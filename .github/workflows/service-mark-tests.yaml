@@ -1,0 +1,28 @@
+name: Service mark tests
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "scripts/_xkeen/02_install/07_install_register/04_register_init.sh"
+      - "spec/test_routing_marks.sh"
+      - ".github/workflows/service-mark-tests.yaml"
+  pull_request:
+    paths:
+      - "scripts/_xkeen/02_install/07_install_register/04_register_init.sh"
+      - "spec/test_routing_marks.sh"
+      - ".github/workflows/service-mark-tests.yaml"
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Test service mark validation
+        run: |
+          docker run --rm \
+            -v "$PWD:/repo:ro" \
+            alpine:3.22 \
+            sh /repo/spec/test_routing_marks.sh

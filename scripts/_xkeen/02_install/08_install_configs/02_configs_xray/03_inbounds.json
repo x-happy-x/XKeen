@@ -1,10 +1,10 @@
 {
   "inbounds": [
     {
-      "port": 1181,
       "protocol": "tunnel",
+      "port": 1181,
       "settings": {
-        "network": "tcp",
+        "allowedNetwork": "tcp",
         "followRedirect": true
       },
       "sniffing": {
@@ -15,10 +15,10 @@
       "tag": "redirect"
     },
     {
-      "port": 1181,
       "protocol": "tunnel",
+      "port": 1181,
       "settings": {
-        "network": "udp",
+        "allowedNetwork": "udp",
         "followRedirect": true
       },
       "streamSettings": {
@@ -32,19 +32,19 @@
       "tag": "tproxy"
     },
     {
-      "port": 1191,
       "protocol": "tunnel",
+      "port": 1191,
       "settings": {
-        "network": "tcp",
+        "allowedNetwork": "tcp",
         "followRedirect": true
       },
       "tag": "force-proxy-redirect"
     },
     {
-      "port": 1191,
       "protocol": "tunnel",
+      "port": 1191,
       "settings": {
-        "network": "udp",
+        "allowedNetwork": "udp",
         "followRedirect": true
       },
       "streamSettings": {

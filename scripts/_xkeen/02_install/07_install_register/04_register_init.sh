@@ -39,6 +39,8 @@ file_netfilter_hook="/opt/etc/ndm/netfilter.d/proxy.sh"
 file_schedule_hook="/opt/etc/ndm/schedule.d/00-xkeen-hotspot-sync.sh"
 log_access="$log_dir/$name_client/access.log"
 log_error="$log_dir/$name_client/error.log"
+# Предел для лога клиента: при старте файл обрезается, если перерос.
+log_max_size=5242880
 mihomo_config="$directory_configs_app/config.yaml"
 file_port_proxying="$xkeen_cfg/port_proxying.lst"
 file_port_exclude="$xkeen_cfg/port_exclude.lst"
@@ -418,6 +420,20 @@ if readlink $(which ip) | grep -q 'busybox'; then
 fi
 
 log_clean() { [ "$name_client" = "xray" ] && : > "$log_access" && : > "$log_error"; }
+
+# mihomo пишет и свой лог, и вывод встроенных библиотек в stdout/stderr.
+# Отправлять их в /dev/null — значит терять единственный след транспортных
+# проблем, поэтому держим их в логе клиента. Размер ограничен, чтобы
+# подробный log-level не забил /opt.
+prepare_client_log() {
+    mkdir -p "$(dirname "$log_error")" 2>/dev/null || return 1
+    if [ -f "$log_error" ]; then
+        _log_size=$(wc -c < "$log_error" 2>/dev/null || echo 0)
+        [ "${_log_size:-0}" -gt "$log_max_size" ] && : > "$log_error"
+        unset _log_size
+    fi
+    return 0
+}
 
 api_cache_init() {
     api_policy_json=$(curl_api "${url_server}/${url_policy}" 2>/dev/null)
@@ -2163,6 +2179,8 @@ EOL
     inject_var proxy_dns "$proxy_dns"
     inject_var proxy_router "$proxy_router"
     inject_var directory_configs_app "$directory_configs_app"
+    inject_var log_error "$log_error"
+    inject_var log_max_size "$log_max_size"
     inject_var directory_xray_config "$directory_xray_config"
     inject_var directory_xray_asset "$directory_xray_asset"
     inject_var iptables_supported "$iptables_supported"
@@ -2187,6 +2205,17 @@ EOL
     inject_var killswitch "$killswitch"
 
     cat >> "$file_netfilter_hook" <<'EOL'
+# Хук исполняется отдельным процессом и функций init-скрипта не видит,
+# поэтому держит свою копию.
+prepare_client_log() {
+    mkdir -p "$(dirname "$log_error")" 2>/dev/null || return 1
+    if [ -f "$log_error" ]; then
+        _log_size=$(wc -c < "$log_error" 2>/dev/null || echo 0)
+        [ "${_log_size:-0}" -gt "$log_max_size" ] && : > "$log_error"
+        unset _log_size
+    fi
+    return 0
+}
 
 # Перезапуск скрипта
 restart_script() {
@@ -3127,7 +3156,10 @@ else
             if [ -z "$GOMEMLIMIT" ] && [ -n "$gomemlimit_value" ]; then
                 export GOMEMLIMIT="$gomemlimit_value"
             fi
-            "$name_client" >/dev/null 2>&1 &
+            # Тот же лог, что и при обычном старте: холодный запуск не должен
+            # быть единственным режимом без следов.
+            prepare_client_log || log_error="/dev/null"
+            "$name_client" >>"$log_error" 2>&1 &
         ;;
     esac
     _probe=0
@@ -3699,14 +3731,20 @@ proxy_start() {
                         # См. apply_gomemlimit: доля/лимит из xkeen.json,
                         # минимум 64MiB, внешний GOMEMLIMIT не игнорируется.
                         apply_gomemlimit
+                        # Не смогли подготовить файл — стартуем как раньше,
+                        # запуск клиента важнее его лога.
+                        prepare_client_log || log_error="/dev/null"
                         if [ -n "$fd_out" ]; then
-                            nohup "$name_client" >/dev/null 2>&1 &
+                            nohup "$name_client" >>"$log_error" 2>&1 &
                             unset fd_out
                         else
                             if [ "$start_verbose" = "on" ]; then
-                                "$name_client" &
+                                # Подробный режим оставляет вывод в терминале,
+                                # но лог всё равно нужен: при старте системой
+                                # терминала нет и следы теряются.
+                                "$name_client" 2>&1 | tee -a "$log_error" &
                             else
-                                "$name_client" >/dev/null 2>&1 &
+                                "$name_client" >>"$log_error" 2>&1 &
                             fi
                         fi
                         ;;

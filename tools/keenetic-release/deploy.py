@@ -35,8 +35,12 @@ def main():
     parser.add_argument('--router', default='keenetic')
     parser.add_argument('--apply', action='store_true', help='Install; default only prepares and validates local payload')
     parser.add_argument('--adaptive', action='store_true', help='Enable ROUTER adaptive checks and restore four automatic fallback groups')
+    parser.add_argument('--preserve-service', action='store_true', help='Keep current routing service while updating core, UI and updater files')
+    parser.add_argument('--preserve-groups', action='store_true', help='Collect adaptive statistics without changing current selector groups')
+    parser.add_argument('--verify-seconds', type=int, default=180, help='Router-side connectivity observation before acknowledging (0..1200)')
     parser.add_argument('--output', type=pathlib.Path)
     args = parser.parse_args()
+    assert 0 <= args.verify_seconds <= 1200
     stamp = datetime.now().strftime('%Y%m%d_%H%M%S')
     workspace = args.output or pathlib.Path(os.environ.get('LOCALAPPDATA', pathlib.Path.home()))/'HomeNet'/'deployments'/stamp
     workspace.mkdir(parents=True, exist_ok=False)
@@ -78,7 +82,7 @@ def main():
     for var in variables:
         found = re.search(r'^'+var+r'=.*$', old_service, re.M)
         if found: template = re.sub(r'^'+var+r'=.*$', lambda _: found.group(), template, count=1, flags=re.M)
-    write(payload/'S05xkeen', template, True)
+    write(payload/'S05xkeen', old_service if args.preserve_service else template, True)
     expression = '."external-ui-url" = "https://github.com/x-happy-x/zashboard/releases/latest/download/dist-cdn-fonts.zip"'
     changed_groups = []
     if args.adaptive:
@@ -89,10 +93,11 @@ def main():
             'targets': [{'url': 'https://www.google.com/', 'expected-status': '200', 'min-bytes': 1024}, {'url': 'https://www.cloudflare.com/cdn-cgi/trace', 'expected-status': '200', 'min-bytes': 64}]}
         health = {'enable': True, 'url': 'https://www.gstatic.com/generate_204', 'expected-status': '204', 'interval': 300, 'timeout': 5000, 'lazy': False, 'adaptive': adaptive}
         expression += ' | ."proxy-providers".ROUTER."health-check" = '+json.dumps(health)
-        changed_groups = [g['name'] for g in config['proxy-groups'] if g['name'] in ('EU','RU','Без белых списков','AUTO')]
+        changed_groups = [] if args.preserve_groups else [g['name'] for g in config['proxy-groups'] if g['name'] in ('EU','RU','Без белых списков','AUTO')]
         for name in changed_groups:
             expression += ' | (."proxy-groups"[] | select(.name == '+json.dumps(name,ensure_ascii=False)+')).type = "fallback"'
-        expression += ' | (."proxy-groups"[] | select(.name == "AUTO"))."health-check-urls" = ["https://www.gstatic.com/generate_204", "https://cp.cloudflare.com/generate_204"]'
+        if 'AUTO' in changed_groups:
+            expression += ' | (."proxy-groups"[] | select(.name == "AUTO"))."health-check-urls" = ["https://www.gstatic.com/generate_204", "https://cp.cloudflare.com/generate_204"]'
     updated = ssh(host, '/opt/sbin/yq '+shlex.quote(expression)+' -', raw)
     write(payload/'config.yaml', updated)
     # Prove unrelated routing, DNS, credentials and outbound definitions did not change.
@@ -116,12 +121,21 @@ def main():
             baseline = url; break
         except subprocess.CalledProcessError: pass
     write(payload/'network-check-url', baseline)
+    checks = []
+    for url in ['https://www.google.com/', 'https://www.cloudflare.com/cdn-cgi/trace', 'https://chatgpt.com/']:
+        try:
+            status = ssh(host, "curl -x http://127.0.0.1:1080 --noproxy '' -sS --connect-timeout 5 --max-time 10 -o /dev/null -w '%{http_code}' "+shlex.quote(url)).decode().strip()
+            if status in ('200', '403'): checks.append(status+' '+url)
+        except subprocess.CalledProcessError: pass
+    assert checks, 'No working proxy baseline; deployment not safe to acknowledge'
+    write(payload/'network-checks', '\n'.join(checks)+'\n')
+    write(payload/'verify-seconds', str(args.verify_seconds))
     for name in ('transaction.sh','rollback.sh'): write(payload/name,(HERE/name).read_bytes(),True)
     manifest = ''.join(hashlib.sha256(p.read_bytes()).hexdigest()+'  '+p.relative_to(payload).as_posix()+'\n' for p in sorted(payload.rglob('*')) if p.is_file())
     write(payload/'payload.sha256',manifest)
     backup = '/opt/backups/homenet-'+stamp
     stage = '/opt/tmp/homenet-release-'+stamp
-    report = dict(core=core_version, ui=ui_version, xkeen=xkeen_version, router=host, backup=backup, stage=stage, adaptive=args.adaptive, changedGroups=changed_groups, baseline=baseline, applied=False)
+    report = dict(core=core_version, ui=ui_version, xkeen=xkeen_version, router=host, backup=backup, stage=stage, adaptive=args.adaptive, preserveService=args.preserve_service, changedGroups=changed_groups, baseline=baseline, checks=checks, verifySeconds=args.verify_seconds, applied=False)
     write(workspace/'report.json',json.dumps(report,ensure_ascii=False,indent=2))
     write(workspace/'rollback.ps1', "$ErrorActionPreference = 'Stop'\nssh -o BatchMode=yes "+shlex.quote(host)+" \"sh '"+backup+"/rollback.sh' --apply\"\nif ($LASTEXITCODE -ne 0) { throw 'Rollback failed' }\n")
     print(json.dumps({'prepared':str(workspace),**report},ensure_ascii=False),flush=True)
@@ -130,8 +144,8 @@ def main():
     with tarfile.open(fileobj=stream,mode='w:gz') as archive:
         for path in payload.iterdir(): archive.add(path,arcname=path.name)
     ssh(host, 'umask 077; mkdir -p '+shlex.quote(stage)+'; tar -xzf - -C '+shlex.quote(stage),stream.getvalue())
-    ssh(host, 'nohup sh '+stage+'/transaction.sh '+stage+' '+backup+' >'+stage+'/deploy.log 2>&1 </dev/null &')
-    deadline=time.monotonic()+240
+    ssh(host, 'HOMENET_CONFIRM_TIMEOUT='+str(args.verify_seconds+600)+' nohup sh '+stage+'/transaction.sh '+stage+' '+backup+' >'+stage+'/deploy.log 2>&1 </dev/null &')
+    deadline=time.monotonic()+240+args.verify_seconds
     while time.monotonic()<deadline:
         flags=ssh(host, 'for f in ready rolled-back; do [ ! -f '+backup+'/$f ] || echo $f; done; true').decode().split()
         failed=ssh(host, 'test ! -f '+stage+'/failed || cat '+stage+'/failed').decode().strip()

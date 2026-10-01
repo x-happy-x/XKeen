@@ -1,5 +1,5 @@
 """Exercise recovery on a fake /opt tree. Run on Linux; never touches a real service."""
-import hashlib, json, os, pathlib, subprocess, tempfile, time
+import hashlib, json, os, pathlib, subprocess, tarfile, tempfile, time
 HERE = pathlib.Path(__file__).resolve().parent
 
 def put(root, name, content, executable=False):
@@ -9,10 +9,10 @@ def put(root, name, content, executable=False):
     if executable: p.chmod(0o755)
     return p
 
-def scenario(fail=False, watchdog=False):
+def scenario(fail=False, watchdog=False, network_fail=False):
     with tempfile.TemporaryDirectory(prefix='homenet-transaction-test-') as tmp:
         root = pathlib.Path(tmp)
-        env = {**os.environ, 'HOMENET_ROOT': tmp, 'HOMENET_CONFIRM_TIMEOUT': '3'}
+        env = {**os.environ, 'HOMENET_ROOT': tmp, 'HOMENET_CONFIRM_TIMEOUT': '3' if not network_fail else '30', 'HOMENET_PROBE_INTERVAL': '1'}
         stage = root / 'opt/tmp/homenet-release-test'
         backup = root / 'opt/backups/homenet-test'
         put(root, 'opt/sbin/mihomo', '#!/bin/sh\necho old\n', True)
@@ -33,11 +33,13 @@ def scenario(fail=False, watchdog=False):
         put(stage, 'config.yaml', 'new-config')
         put(stage, 'version.txt', 'new')
         put(stage, 'network-check-url', '')
+        put(stage, 'network-checks', '200 https://test.invalid/\n')
+        put(stage, 'verify-seconds', '5' if network_fail else '0')
         put(stage, 'rollback.sh', (HERE/'rollback.sh').read_text(), True)
         checks = ''.join(hashlib.sha256(p.read_bytes()).hexdigest()+'  '+p.relative_to(stage).as_posix()+'\n' for p in stage.rglob('*') if p.is_file())
         put(stage, 'payload.sha256', checks)
         result = subprocess.run(['sh', str(HERE/'transaction.sh'), str(stage), str(backup)], env=env, capture_output=True, text=True)
-        if not fail:
+        if not fail and not network_fail:
             assert result.returncode == 0, result.stderr
             assert (root/'opt/etc/mihomo/config.yaml').is_symlink()
             assert (root/'opt/etc/mihomo/profiles/default.yaml').read_text() == 'new-config'
@@ -60,8 +62,15 @@ def scenario(fail=False, watchdog=False):
         assert (root/'opt/etc/mihomo/zash/index.html').read_text() == 'old-ui'
         assert (root/'opt/sbin/.xkeen/old-module').exists()
         assert not (root/'opt/sbin/.xkeen/new-module').exists()
-        print(json.dumps({'failure': fail, 'watchdog': watchdog, 'rollback': 'OK'}))
+        failed_states = list(backup.glob('failed-state-*.tar'))
+        assert len(failed_states) == 1
+        with tarfile.open(failed_states[0]) as archive:
+            assert archive.extractfile('opt/etc/mihomo/profiles/default.yaml').read() == b'new-config'
+            assert archive.extractfile('opt/etc/mihomo/cache.db').read() == b'old-history'
+        assert failed_states[0].stat().st_mode & 0o077 == 0
+        print(json.dumps({'failure': fail, 'watchdog': watchdog, 'networkFailure': network_fail, 'rollback': 'OK'}))
 
 scenario()
 scenario(fail=True)
 scenario(watchdog=True)
+scenario(network_fail=True)

@@ -105,6 +105,26 @@ if [ -s "$STAGE/network-check-url" ]; then
   url=$(cat "$STAGE/network-check-url")
   curl -x http://127.0.0.1:1080 --noproxy '' -fsSL --connect-timeout 8 --max-time 30 "$url" -o /dev/null
 fi
+# Keep recovery armed while checking the same destinations that worked before.
+# This loop runs on the router even when the host loses its connection.
+verify_seconds=0
+[ ! -f "$STAGE/verify-seconds" ] || verify_seconds=$(cat "$STAGE/verify-seconds")
+case "$verify_seconds" in ''|*[!0-9]*) exit 1;; esac
+[ "$verify_seconds" -le 1200 ] || exit 1
+deadline=$(($(date +%s) + verify_seconds))
+failures=0
+while [ "$(date +%s)" -lt "$deadline" ]; do
+  healthy=1
+  while read -r expected_status url; do
+    [ -n "$url" ] || continue
+    status=$(curl -x http://127.0.0.1:1080 --noproxy '' -sS --connect-timeout 5 --max-time 10 -o /dev/null -w '%{http_code}' "$url" 2>/dev/null) || status=000
+    [ "$status" = "$expected_status" ] || healthy=0
+    printf '%s %s %s\n' "$(date +%s)" "$status" "$url" >> "$BASE/connectivity.log"
+  done < "$STAGE/network-checks"
+  if [ "$healthy" = 1 ]; then failures=0; else failures=$((failures + 1)); fi
+  [ "$failures" -lt 2 ] || { echo 'Connectivity regressed; restoring previous installation' >&2; exit 1; }
+  sleep "${HOMENET_PROBE_INTERVAL:-20}"
+done
 armed=0
 stopped=0
 : > "$BASE/ready"

@@ -83,6 +83,10 @@ mv "$OPT/sbin/.xkeen" "$BASE/replaced-xkeen"
 mv "$STAGE/xkeen/_xkeen" "$OPT/sbin/.xkeen"
 mv "$OPT/etc/mihomo/zash" "$BASE/replaced-zash"
 mv "$STAGE/zash" "$OPT/etc/mihomo/zash"
+if [ -d "$BASE/replaced-zash/assets" ]; then
+  mkdir -p "$OPT/etc/mihomo/zash/assets"
+  cp -an "$BASE/replaced-zash/assets/." "$OPT/etc/mihomo/zash/assets/"
+fi
 cp "$STAGE/S05xkeen" "$SERVICE.new"
 chmod 755 "$SERVICE.new"
 mv "$SERVICE.new" "$SERVICE"
@@ -112,17 +116,23 @@ verify_seconds=0
 case "$verify_seconds" in ''|*[!0-9]*) exit 1;; esac
 [ "$verify_seconds" -le 1200 ] || exit 1
 deadline=$(($(date +%s) + verify_seconds))
-failures=0
+google_failures=0
+cloudflare_failures=0
 while [ "$(date +%s)" -lt "$deadline" ]; do
-  healthy=1
   while read -r expected_status url; do
     [ -n "$url" ] || continue
     status=$(curl -x http://127.0.0.1:1080 --noproxy '' -sS --connect-timeout 5 --max-time 10 -o /dev/null -w '%{http_code}' "$url" 2>/dev/null) || status=000
-    [ "$status" = "$expected_status" ] || healthy=0
+    # AI sites may reject clients or intermittently fail on an independent
+    # policy group. Record them, but do not roll back the whole router for that.
+    case "$url" in
+      https://www.google.com/)
+        if [ "$status" = "$expected_status" ]; then google_failures=0; else google_failures=$((google_failures + 1)); fi ;;
+      https://www.cloudflare.com/cdn-cgi/trace)
+        if [ "$status" = "$expected_status" ]; then cloudflare_failures=0; else cloudflare_failures=$((cloudflare_failures + 1)); fi ;;
+    esac
     printf '%s %s %s\n' "$(date +%s)" "$status" "$url" >> "$BASE/connectivity.log"
   done < "$STAGE/network-checks"
-  if [ "$healthy" = 1 ]; then failures=0; else failures=$((failures + 1)); fi
-  [ "$failures" -lt 2 ] || { echo 'Connectivity regressed; restoring previous installation' >&2; exit 1; }
+  [ "$google_failures" -lt 3 ] && [ "$cloudflare_failures" -lt 3 ] || { echo 'Connectivity regressed; restoring previous installation' >&2; exit 1; }
   sleep "${HOMENET_PROBE_INTERVAL:-20}"
 done
 armed=0

@@ -40,13 +40,21 @@ done
 # Atomic replacement is also safe if an old executable still has an open mapping.
 [ ! -f "$OPT/sbin/mihomo" ] || mv "$OPT/sbin/mihomo" "$BASE/failed-mihomo-$(date +%s)-$$"
 # Move only the two replaceable trees aside; old files must not mix with new ones.
+failed_ui=''
 for rel in sbin/.xkeen etc/mihomo/zash; do
   if [ -d "$OPT/$rel" ]; then
     destination="$BASE/failed-$(basename "$rel")-$(date +%s)-$$"
     mv "$OPT/$rel" "$destination"
+    [ "$rel" != etc/mihomo/zash ] || failed_ui="$destination"
   fi
 done
 tar -xf "$BASE/before.tar" -C "${ROOT:-/}"
+# Cached HTML can still request the newer content-hashed assets after rollback.
+# Keep both immutable asset sets while restoring the previous entry point.
+if [ -n "$failed_ui" ] && [ -d "$failed_ui/assets" ]; then
+  mkdir -p "$OPT/etc/mihomo/zash/assets"
+  cp -an "$failed_ui/assets/." "$OPT/etc/mihomo/zash/assets/"
+fi
 sync
 "$SERVICE" start manual >"$BASE/rollback-start.log" 2>&1
 : > "$BASE/rolled-back"

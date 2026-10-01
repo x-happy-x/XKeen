@@ -18,7 +18,8 @@ def scenario(fail=False, watchdog=False):
         put(root, 'opt/sbin/mihomo', '#!/bin/sh\necho old\n', True)
         put(root, 'opt/sbin/xkeen', '#!/bin/sh\necho old-cli\n', True)
         put(root, 'opt/sbin/.xkeen/old-module', 'old')
-        put(root, 'opt/etc/init.d/S05xkeen', '#!/bin/sh\nexit 0\n', True)
+        put(root, 'opt/etc/init.d/S05xkeen', '#!/bin/sh\n[ "$1" != stop ] || rm -f "$HOMENET_ROOT/opt/etc/ndm/schedule.d/00-xkeen-hotspot-sync.sh"\nexit 0\n', True)
+        put(root, 'opt/etc/ndm/schedule.d/00-xkeen-hotspot-sync.sh', 'old-hook')
         put(root, 'opt/etc/mihomo/profiles/default.yaml', 'old-config')
         (root / 'opt/etc/mihomo/config.yaml').symlink_to('profiles/default.yaml')
         put(root, 'opt/etc/mihomo/cache.db', 'old-history')
@@ -55,6 +56,7 @@ def scenario(fail=False, watchdog=False):
         assert (root/'opt/etc/mihomo/profiles/default.yaml').read_text() == 'old-config'
         assert (root/'opt/etc/mihomo/config.yaml').is_symlink()
         assert (root/'opt/etc/mihomo/cache.db').read_text() == 'old-history'
+        assert (root/'opt/etc/ndm/schedule.d/00-xkeen-hotspot-sync.sh').read_text() == 'old-hook'
         assert (root/'opt/etc/mihomo/zash/index.html').read_text() == 'old-ui'
         assert (root/'opt/sbin/.xkeen/old-module').exists()
         assert not (root/'opt/sbin/.xkeen/new-module').exists()

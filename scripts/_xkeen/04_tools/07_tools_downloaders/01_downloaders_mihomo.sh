@@ -51,7 +51,7 @@ download_mihomo() {
                 sleep 1
                 continue
             fi
-            [ "$USE_JSDELIVR" = "true" ] && version_selected="v$version_selected"
+            version_selected="v${version_selected#v}"
         fi
 
         VERSION_ARG="$version_selected"

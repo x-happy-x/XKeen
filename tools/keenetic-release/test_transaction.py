@@ -9,10 +9,10 @@ def put(root, name, content, executable=False):
     if executable: p.chmod(0o755)
     return p
 
-def scenario(fail=False, watchdog=False, network_fail=False):
+def scenario(fail=False, watchdog=False, network_fail=False, ai_failure=False):
     with tempfile.TemporaryDirectory(prefix='homenet-transaction-test-') as tmp:
         root = pathlib.Path(tmp)
-        env = {**os.environ, 'HOMENET_ROOT': tmp, 'HOMENET_CONFIRM_TIMEOUT': '3' if not network_fail else '30', 'HOMENET_PROBE_INTERVAL': '1'}
+        env = {**os.environ, 'HOMENET_ROOT': tmp, 'HOMENET_CONFIRM_TIMEOUT': '30' if network_fail or ai_failure else '3', 'HOMENET_PROBE_INTERVAL': '1'}
         stage = root / 'opt/tmp/homenet-release-test'
         backup = root / 'opt/backups/homenet-test'
         put(root, 'opt/sbin/mihomo', '#!/bin/sh\necho old\n', True)
@@ -24,17 +24,19 @@ def scenario(fail=False, watchdog=False, network_fail=False):
         (root / 'opt/etc/mihomo/config.yaml').symlink_to('profiles/default.yaml')
         put(root, 'opt/etc/mihomo/cache.db', 'old-history')
         put(root, 'opt/etc/mihomo/zash/index.html', 'old-ui')
+        put(root, 'opt/etc/mihomo/zash/assets/old-hash.js', 'old-asset')
         put(root, 'opt/bin/curl', '#!/bin/sh\ncase "$*" in */version*) echo \'{"version":"new"}\';; *) echo html;; esac\n', True)
         put(stage, 'mihomo', '#!/bin/sh\nexit 0\n', False)
         put(stage, 'xkeen/xkeen', '#!/bin/sh\necho new-cli\n', True)
         put(stage, 'xkeen/_xkeen/new-module', 'new')
         put(stage, 'zash/index.html', 'new-ui')
+        put(stage, 'zash/assets/new-hash.js', 'new-asset')
         put(stage, 'S05xkeen', '#!/bin/sh\nexit '+('1' if fail else '0')+'\n', True)
         put(stage, 'config.yaml', 'new-config')
         put(stage, 'version.txt', 'new')
         put(stage, 'network-check-url', '')
-        put(stage, 'network-checks', '200 https://test.invalid/\n')
-        put(stage, 'verify-seconds', '5' if network_fail else '0')
+        put(stage, 'network-checks', '403 https://chatgpt.com/\n' if ai_failure else '200 https://www.google.com/\n')
+        put(stage, 'verify-seconds', '5' if network_fail else '2' if ai_failure else '0')
         put(stage, 'rollback.sh', (HERE/'rollback.sh').read_text(), True)
         checks = ''.join(hashlib.sha256(p.read_bytes()).hexdigest()+'  '+p.relative_to(stage).as_posix()+'\n' for p in stage.rglob('*') if p.is_file())
         put(stage, 'payload.sha256', checks)
@@ -43,6 +45,8 @@ def scenario(fail=False, watchdog=False, network_fail=False):
             assert result.returncode == 0, result.stderr
             assert (root/'opt/etc/mihomo/config.yaml').is_symlink()
             assert (root/'opt/etc/mihomo/profiles/default.yaml').read_text() == 'new-config'
+            assert (root/'opt/etc/mihomo/zash/assets/old-hash.js').read_text() == 'old-asset'
+            assert (root/'opt/etc/mihomo/zash/assets/new-hash.js').read_text() == 'new-asset'
             if watchdog:
                 for _ in range(40):
                     if (backup/'rolled-back').exists(): break
@@ -60,6 +64,8 @@ def scenario(fail=False, watchdog=False, network_fail=False):
         assert (root/'opt/etc/mihomo/cache.db').read_text() == 'old-history'
         assert (root/'opt/etc/ndm/schedule.d/00-xkeen-hotspot-sync.sh').read_text() == 'old-hook'
         assert (root/'opt/etc/mihomo/zash/index.html').read_text() == 'old-ui'
+        assert (root/'opt/etc/mihomo/zash/assets/old-hash.js').read_text() == 'old-asset'
+        assert (root/'opt/etc/mihomo/zash/assets/new-hash.js').read_text() == 'new-asset'
         assert (root/'opt/sbin/.xkeen/old-module').exists()
         assert not (root/'opt/sbin/.xkeen/new-module').exists()
         failed_states = list(backup.glob('failed-state-*.tar'))
@@ -68,9 +74,10 @@ def scenario(fail=False, watchdog=False, network_fail=False):
             assert archive.extractfile('opt/etc/mihomo/profiles/default.yaml').read() == b'new-config'
             assert archive.extractfile('opt/etc/mihomo/cache.db').read() == b'old-history'
         assert failed_states[0].stat().st_mode & 0o077 == 0
-        print(json.dumps({'failure': fail, 'watchdog': watchdog, 'networkFailure': network_fail, 'rollback': 'OK'}))
+        print(json.dumps({'failure': fail, 'watchdog': watchdog, 'networkFailure': network_fail, 'aiFailure': ai_failure, 'rollback': 'OK'}))
 
 scenario()
 scenario(fail=True)
 scenario(watchdog=True)
 scenario(network_fail=True)
+scenario(ai_failure=True)

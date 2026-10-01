@@ -58,15 +58,25 @@ add_mihomo_config() {
             mkdir "$mihomo_conf_dir"
         fi
             cat << EOF > "$mihomo_conf_dir/config.yaml"
-tproxy-port: 1181
-redir-port: 1182
+find-process-mode: off # снижает нагрузку на роутер
 # Не открывайте external-controller в LAN без secret — это полный контроль над ядром
+
+listeners:
+  - name: tproxy
+    type: tproxy
+    port: 1181
+    udp: true
+
+  - name: redir
+    type: redir
+    port: 1182
+
 # Руководство по конфигурации Mihomo - https://wiki.metacubex.one/ru/config/
 EOF
 
-        echo
         echo "  Добавлен шаблон конфигурационного файла Mihomo:"
         echo -e "  ${yellow}config.yaml${reset}"
+        echo
         sleep 2
     fi
 }

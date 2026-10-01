@@ -43,7 +43,7 @@ toggle_param() {
             if [ "$current_state" = "on" ]; then
                 echo -e "  Состояние ${description} уже ${green}включено${reset}"
             else
-                echo -e "  Состояние ${description} уже ${red}отключено${reset}"
+                echo -e "  Состояние ${description} уже ${light_blue}отключено${reset}"
             fi
             [ "$apply" = "restart" ] && echo
             return 0
@@ -65,7 +65,7 @@ toggle_param() {
             echo "     0. Оставить без изменений"
             desired_state="off"
         else
-            echo -e "  ${red}Отключено${reset}"
+            echo -e "  ${light_blue}Отключено${reset}"
             echo
             echo "     1. Включить"
             echo "     0. Оставить без изменений"
@@ -81,7 +81,7 @@ toggle_param() {
                     if [ "$current_state" = "on" ]; then
                         echo -e "  Состояние ${description} ${green}оставлено включённым${reset}"
                     else
-                        echo -e "  Состояние ${description} ${red}оставлено отключённым${reset}"
+                        echo -e "  Состояние ${description} ${light_blue}оставлено отключённым${reset}"
                     fi
                     return 0 
                     ;;
@@ -104,7 +104,7 @@ toggle_param() {
         if [ "$desired_state" = "on" ]; then
             echo -e "  Новое состояние ${description} ${green}включено${reset}"
         else
-            echo -e "  Новое состояние ${description} ${red}отключено${reset}"
+            echo -e "  Новое состояние ${description} ${light_blue}отключено${reset}"
         fi
 
         if [ "$restart_needed" = "reboot" ]; then
@@ -136,7 +136,10 @@ choice_menu() {
     echo
 
     while true; do
-        read -r -p "  Ваш выбор: " choice
+        # Без TTY (cron, ssh без -t) read получает EOF: код возврата ненулевой,
+        # choice остаётся пустым, попадает в ветку * — while true крутится
+        # без блокировки на read, CPU-spin. Трактуем EOF как явный ввод 0.
+        read -r -p "  Ваш выбор: " choice || choice=0
         case "$choice" in
             1) return 0 ;;
             0) return 1 ;;

@@ -26,7 +26,7 @@ jobs:
           fetch-depth: 0
 
       - name: Import GPG key
-        uses: crazy-max/ghaction-import-gpg@v7
+        uses: crazy-max/ghaction-import-gpg@2dc316deee8e90f13e1a351ab510b4d5bc0c82cd # v7.0.0
         with:
           gpg_private_key: ${{ secrets.GPG_PRIVATE_KEY }}
           git_user_signingkey: true
@@ -49,6 +49,11 @@ jobs:
           sed -i "s/^build_timestamp=\".*\"/build_timestamp=\"$BUILD_TIMESTAMP\"/" \
             scripts_for_release/_xkeen/01_info/01_info_variable.sh
 
+      - name: Validate script syntax
+        run: |
+          find scripts_for_release -name '*.sh' -print0 | xargs -0 -n1 sh -n
+          sh -n scripts_for_release/xkeen
+
       - name: Create release archive
         run: |
           mkdir -p dist
@@ -56,6 +61,9 @@ jobs:
           chmod +x xkeen
 
           find . -type f -o -type l | sed 's|^\./||' | tar -czf "../dist/${ARCHIVE_NAME}" -T -
+
+      - name: Verify archive integrity
+        run: tar -tzf "dist/${ARCHIVE_NAME}" >/dev/null
 
       - name: Clean up temporary files
         run: rm -rf scripts_for_release
@@ -75,6 +83,9 @@ jobs:
           # Удаляем старый тег если существует
           git push origin --delete "$TAG_NAME" 2>/dev/null || true
           git tag -d "$TAG_NAME" 2>/dev/null || true
+
+          # Удаляем старый релиз если существует (тег и релиз — разные сущности в GitHub)
+          gh release delete "$TAG_NAME" -y 2>/dev/null || true
 
           # Создаем подписанный тег
           git tag -s "$TAG_NAME" -m "Release $TAG_NAME"

@@ -4,8 +4,9 @@ install_packages() {
     package_name="$2"
 
     if [ "${package_status}" = "not_installed" ]; then
-        if [ ! -e "/tmp/.xkeen_opkg_updated" ]; then
-            opkg update >/dev/null 2>&1 && touch "/tmp/.xkeen_opkg_updated"
+        _xkeen_rundir=$(_xkeen_secure_rundir) || _xkeen_rundir=""
+        if [ -z "$_xkeen_rundir" ] || [ ! -e "$_xkeen_rundir/opkg_updated" ]; then
+            opkg update >/dev/null 2>&1 && [ -n "$_xkeen_rundir" ] && touch "$_xkeen_rundir/opkg_updated"
         fi
         opkg install "$package_name" >/dev/null 2>&1
         opkg_rc=$?
@@ -16,11 +17,16 @@ install_packages() {
     fi
 }
 
-install_packages "$info_packages_curl" "curl"
-install_packages "$info_packages_jq" "jq"
-install_packages "$info_packages_ip_full" "ip-full"
-install_packages "$info_packages_iptables" "iptables"
-install_packages "$info_packages_ipset" "ipset"
-install_packages "$info_packages_cabundle" "ca-bundle"
-install_packages "$info_packages_uname" "coreutils-uname"
-install_packages "$info_packages_nohup" "coreutils-nohup"
+# Устанавливает отсутствующие пакеты по данным _load_packages_info().
+# Вызывается явно из scripts/xkeen вместе с _load_packages_info() — см. commit.
+_ensure_installed_packages() {
+    install_packages "$info_packages_curl" "curl"
+    install_packages "$info_packages_jq" "jq"
+    install_packages "$info_packages_ip_full" "ip-full"
+    install_packages "$info_packages_iptables" "iptables"
+    install_packages "$info_packages_ipset" "ipset"
+    install_packages "$info_packages_cabundle" "ca-bundle"
+    install_packages "$info_packages_uname" "coreutils-uname"
+    install_packages "$info_packages_nohup" "coreutils-nohup"
+    install_packages "$info_packages_conntrack" "conntrack"
+}

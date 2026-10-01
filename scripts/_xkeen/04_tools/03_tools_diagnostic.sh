@@ -15,11 +15,16 @@ diagnostic() {
     fi
 
     ip4_supported=$(ip -4 addr show | grep -q "inet " && echo true || echo false)
-    ip6_supported=$(ip -6 addr show | grep -q "inet6 fe80::" && echo true || echo false)
+    ip6_supported=$(check_ipv6_active && echo true || echo false)
 
     iptables_supported=$([ "$ip4_supported" = "true" ] && command -v iptables >/dev/null 2>&1 && echo true || echo false)
     ip6tables_supported=$([ "$ip6_supported" = "true" ] && command -v ip6tables >/dev/null 2>&1 && echo true || echo false)
 
+    # Локальное замыкание внутри diagnostic(): только присваивает $ipv4_eth
+    # для маскировки IP в diagnostic.txt через mask_ips(), без CIDR и без
+    # объединения с exclude-списками. Независимая пара с одноимённой
+    # get_exclude_ip4() в 04_register_init.sh (другой контракт: echo
+    # объединённого /32-CIDR списка) — тело между файлами не копировать.
     get_exclude_ip4() {
         [ "$iptables_supported" != "true" ] && return
         ipv4_eth=$(ip -o route get 195.208.4.1 2>/dev/null | sed -n 's/.*src \([^ ]*\).*/\1/p' || \
@@ -27,6 +32,11 @@ diagnostic() {
     }
     get_exclude_ip4
 
+    # Локальное замыкание внутри diagnostic(): только присваивает $ipv6_eth
+    # для маскировки IP в diagnostic.txt через mask_ips(), без CIDR и без
+    # объединения с exclude-списками. Независимая пара с одноимённой
+    # get_exclude_ip6() в 04_register_init.sh (другой контракт: echo
+    # объединённого /128-CIDR списка) — тело между файлами не копировать.
     get_exclude_ip6() {
         [ "$ip6tables_supported" != "true" ] && return
         ipv6_eth=$(ip -o -6 route get 2a0c:a9c7:8::1 2>/dev/null | sed -n 's/.*src \([^ ]*\).*/\1/p' || \
@@ -107,17 +117,6 @@ diagnostic() {
         fi
 
         echo "$input"
-    }
-
-    # Функция логирования файлов
-    log_file() {
-        local file="$1"
-        local title="$2"
-        if [ -f "$file" ]; then
-            cat "$file" | log_block "$title"
-        else
-            echo "Файл $file не найден" | log_block "$title"
-        fi
     }
 
     # Функция дампа iptables/ip6tables

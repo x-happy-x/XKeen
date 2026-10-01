@@ -18,8 +18,8 @@
 - [`wiki/Configuration.md`](../wiki/Configuration.md) — внешние списки портов/IP, fd-контроль, Self-Hosted прокси, OffLine-установка.
 - [`wiki/Forkinfo.md`](../wiki/Forkinfo.md) — отличия форка от оригинала Skrill0/XKeen.
 - [`wiki/Knownissues.md`](../wiki/Knownissues.md) — известные ограничения. Читать перед триажом багов.
-- [`test/README.md`](../test/README.md) — release-notes 2.0 Beta, новые параметры и инварианты.
+- [`test/README.md`](../test/README.md) — release-notes 2.0.1 Beta, новые параметры и инварианты.
 
 ## Wiki
 
-Исходники GitHub Wiki лежат в [`../wiki/`](../wiki) и автоматически синхронизируются в `<repo>.wiki.git` через workflow `.github/workflows/wiki-sync.yaml`. См. [build-and-release.md](build-and-release.md#workflow-wiki-syncyaml).
+Исходники GitHub Wiki лежат в [`../wiki/`](../wiki) и автоматически синхронизируются в `<repo>.wiki.git` через workflow `.github/workflows/wiki-sync.yaml`. См. [build-and-release.md](build-and-release.md#wiki-syncyaml).

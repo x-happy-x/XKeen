@@ -20,23 +20,34 @@ _xray_build_url() {
 # $1 = version_selected
 _xray_perform_install() {
     local version="$1"
+    # Кэш списка релизов (см. fetch_release_tags/_release_cache_path в
+    # 00_fetch_with_mirrors.sh) - удаляется на каждом пути выхода отсюда,
+    # использован он verify_github_sha256() или нет.
+    local xpi_cache
+    xpi_cache=$(_release_cache_path "$xray_api_url") || xpi_cache=""
+
     if ! _xray_build_url "$version"; then
         printf "  ${red}Ошибка${reset}: Не удалось получить URL для загрузки Xray\n"
+        [ -n "$xpi_cache" ] && rm -f "$xpi_cache"
         return 1
     fi
     mkdir -p "$tmp_ram"
 
-    if ! _network_probe "$download_url" "версии $version"; then
+    if ! _network_probe "$download_url" "Xray $version"; then
+        [ -n "$xpi_cache" ] && rm -f "$xpi_cache"
         return 1
     fi
 
     printf "  ${yellow}Выполняется загрузка${reset} Xray %s\n" "$version"
     if ! _network_download "$download_url" "$tmp_ram/xray.$extension" "Xray" "$max_attempts" "$delay" 1048576; then
+        [ -n "$xpi_cache" ] && rm -f "$xpi_cache"
         return 1
     fi
     if ! verify_github_sha256 "$tmp_ram/xray.$extension" "$download_url" "${xray_api_url}/tags/$version"; then
+        [ -n "$xpi_cache" ] && rm -f "$xpi_cache"
         return 1
     fi
+    [ -n "$xpi_cache" ] && rm -f "$xpi_cache"
 
     printf "  Xray ${green}успешно загружен${reset}\n"
     return 0
@@ -47,19 +58,7 @@ download_xray() {
     USE_JSDELIVR=""
     printf "\n  ${green}Запрос информации${reset} о релизах ${yellow}Xray${reset}\n"
     fetch_release_tags "$xray_api_url" "$xray_jsd_url" "10"
-
-    # --- АВТОМАТИЧЕСКИЙ РЕЖИМ ---
-    if [ "$autoinstall_mode" = "true" ]; then
-        version_selected=$(echo "$RELEASE_TAGS" | head -1)
-        [ "$USE_JSDELIVR" = "true" ] && version_selected="v$version_selected"
-        printf "  ${green}Авто-режим${reset}: выбрана последняя версия ${yellow}%s${reset}\n" "$version_selected"
-
-        if _xray_perform_install "$version_selected"; then
-            return 0
-        else
-            exit 1
-        fi
-    fi
+    _dlx_cache=$(_release_cache_path "$xray_api_url") || _dlx_cache=""
 
     # --- ИНТЕРАКТИВНЫЙ РЕЖИМ ---
     while true; do
@@ -84,6 +83,7 @@ download_xray() {
 
         if [ "$choice" = "0" ]; then
             bypass_xray="true"
+            [ -n "$_dlx_cache" ] && rm -f "$_dlx_cache"
             printf "  Загрузка Xray ${yellow}пропущена${reset}\n"
             return
         fi

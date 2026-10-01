@@ -10,7 +10,7 @@ help_xkeen() {
     echo -e "  ${yellow}Установка${reset}"
     echo -e "	-i		${italic}Основной режим установки XKeen + Xray + Mihomo + GeoFile/GeoIPSET${reset}"
     echo -e "	-io		${italic}OffLine установка XKeen${reset}"
-    echo -e "	-toff		${italic}Отключение таймаута при меделенной загрузке с GitHub (xkeen -i -toff)${reset}"
+    echo -e "	-toff		${italic}Отключение таймаута при медленной загрузке с GitHub (xkeen -i -toff)${reset}"
     echo -e "	-health		${italic}Базовая проверка исправности Entware перед установкой XKeen${reset}"
     echo
     echo -e "  ${green}Переустановка${reset}"
@@ -116,7 +116,10 @@ author_donate() {
     echo
 
     while true; do
-        read -r -p "  Ваш выбор: " choice
+        # Без TTY (cron, ssh без -t) read получает EOF: код возврата ненулевой,
+        # choice остаётся пустым, попадает в ветку * — while true крутится
+        # без блокировки на read, CPU-spin. Трактуем EOF как явный ввод 0.
+        read -r -p "  Ваш выбор: " choice || choice=0
         case "$choice" in
             1)
                 echo

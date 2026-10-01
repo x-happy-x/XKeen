@@ -21,7 +21,7 @@ echo -e "  ${yellow}Опции${reset}"
 echo -e "    -s, --stable	${italic}Установить стабильную версию${reset}"
 echo -e "    -b, --beta		${italic}Установить бета-версию${reset}"
 echo -e "    -l, --legacy ВЕРСИЯ	${italic}Установить предыдущую версию (например, 1.1.3.9)${reset}"
-echo -e "    -p, --patch		${italic}Пропатчить установленную версию для совместимости с KeeneticOS 5.1.2+${reset}"
+echo -e "    -p, --patch		${italic}Пропатчить установленную версию для совместимости с KeeneticOS 5.1.2${reset}"
 echo -e "    -h, --help		${italic}Показать эту справку${reset}"
 echo
 echo -e "  ${yellow}Примеры${reset}"
@@ -33,18 +33,46 @@ echo  "    $0 --help"
 echo  "    curl -sSL https://raw.githubusercontent.com/jameszeroX/XKeen/main/install.sh | sh -s -- --stable"
 }
 
+# Дубль функции из scripts/_xkeen/01_info/01_info_common.sh: install.sh
+# запускается до установки модулей и своих копий-файлов не подключает,
+# поэтому правки нужны в обоих местах. Разбор состоянием, а не регуляркой —
+# регулярка не отличает комментарий от строкового значения (см. обоснование
+# в оригинале).
+strip_json_comments() {
+    awk '
+    {
+        line = ""; i = 1; n = length($0); instr = 0; esc = 0
+        while (i <= n) {
+            c = substr($0, i, 1)
+            if (inblk) {
+                if (c == "*" && substr($0, i + 1, 1) == "/") { inblk = 0; i += 2 } else i++
+                continue
+            }
+            if (instr) {
+                line = line c
+                if (esc) esc = 0
+                else if (c == "\\") esc = 1
+                else if (c == "\"") instr = 0
+                i++
+                continue
+            }
+            if (c == "\"") { instr = 1; line = line c; i++; continue }
+            if (c == "/" && substr($0, i + 1, 1) == "*") { inblk = 1; i += 2; continue }
+            if (c == "/" && substr($0, i + 1, 1) == "/") break
+            line = line c; i++
+        }
+        print line
+    }' "$@"
+}
+
 # Функция извлечения пользовательского прокси из /opt/etc/xkeen/xkeen.json
 get_user_proxy() {
     gh_proxy_user=""
     [ ! -f "$xkeen_config" ] && return 1
 
-    gh_proxy_user=$(sed \
-        -e ':a; s:/\*[^*]*\*[^/]*\*/::g; ta' \
-        -e 's/^[[:space:]]*\/\/.*$//' \
-        -e 's/[[:space:]]\{1,\}\/\/.*$//' \
-        "$xkeen_config" | \
+    gh_proxy_user=$(strip_json_comments "$xkeen_config" | \
         sed -n 's/.*"gh_proxy"[[:space:]]*: *"\([^"]*\)".*/\1/p' | \
-        xargs 2>/dev/null)
+        sed 's/^[[:space:]]*//; s/[[:space:]]*$//' 2>/dev/null)
 
     [ "$gh_proxy_user" = "null" ] && gh_proxy_user=""
     [ -z "$gh_proxy_user" ] && return 1
@@ -88,7 +116,85 @@ download_xkeen_release() {
     return 1
 }
 
-# Функция патча установленной версии для совместимости с KeeneticOS 5.1.2+
+# Best-effort проверка SHA-256 скачанного архива через GitHub Releases API.
+# Только для --stable/--legacy: URL распознаётся по шаблону releases/latest
+# или releases/download/<тег> — это настоящие GitHub Release assets, у
+# которых API отдаёт digest. Для --beta (raw.githubusercontent.com/.../test/)
+# шаблон не совпадает, функция тихо возвращает успех — как и self-update
+# (см. 02_downloaders_xkeen.sh: dev-канал раздаётся сырым файлом, без тега
+# и без API digest, проверять там нечего).
+#
+# Деградирует в предупреждение (не блокирует установку), если недоступны
+# jq, GitHub API (напрямую и через оба зеркала) или сам digest в ответе —
+# тот же дух, что verify_downloads=warn по умолчанию в 00_fetch_with_mirrors.sh.
+# jq устанавливается позже, внутри xkeen -i — на первой чистой установке его
+# ещё нет, автоустановку через opkg здесь сознательно не делаем.
+verify_install_sha256() {
+    _vis_file="$1"
+    _vis_url="$2"
+    _vis_asset=$(basename "$_vis_url")
+
+    _vis_api_url=$(printf '%s' "$_vis_url" | \
+        sed -n 's#^https://github\.com/\([^/]*\)/\([^/]*\)/releases/download/\([^/]*\)/.*#https://api.github.com/repos/\1/\2/releases/tags/\3#p')
+    if [ -z "$_vis_api_url" ]; then
+        _vis_api_url=$(printf '%s' "$_vis_url" | \
+            sed -n 's#^https://github\.com/\([^/]*\)/\([^/]*\)/releases/latest/download/.*#https://api.github.com/repos/\1/\2/releases/latest#p')
+    fi
+
+    # URL не похож на GitHub Release asset (--beta) — проверка не для нас
+    [ -z "$_vis_api_url" ] && return 0
+
+    if ! command -v jq >/dev/null 2>&1; then
+        printf "  ${yellow}Предупреждение${reset}: jq не установлен, проверка контрольной суммы ${light_blue}SHA-256${reset} пропущена\n"
+        return 0
+    fi
+
+    _vis_ref="${_vis_file}.sha256ref.$$"
+    if ! curl -fLsS --connect-timeout 10 -m 15 -o "$_vis_ref" "$_vis_api_url"; then
+        if [ -n "$gh_proxy_user" ] && curl -fLsS --connect-timeout 10 -m 15 -o "$_vis_ref" "$gh_proxy_user/$_vis_api_url"; then
+            :
+        elif curl -fLsS --connect-timeout 10 -m 15 -o "$_vis_ref" "https://gh-proxy.com/$_vis_api_url"; then
+            :
+        elif curl -fLsS --connect-timeout 10 -m 15 -o "$_vis_ref" "https://ghfast.top/$_vis_api_url"; then
+            :
+        else
+            rm -f "$_vis_ref"
+            printf "  ${yellow}Предупреждение${reset}: GitHub API недоступен, проверка контрольной суммы ${light_blue}SHA-256${reset} пропущена\n"
+            return 0
+        fi
+    fi
+
+    _vis_expected=$(jq -r --arg asset "$_vis_asset" '.assets[]? | select(.name == $asset) | .digest // ""' "$_vis_ref" 2>/dev/null | head -n 1)
+    rm -f "$_vis_ref"
+
+    case "$_vis_expected" in
+        sha256:*) _vis_expected="${_vis_expected#sha256:}" ;;
+    esac
+
+    case "$_vis_expected" in
+        [0-9a-fA-F][0-9a-fA-F]*) ;;
+        *)
+            printf "  ${yellow}Предупреждение${reset}: контрольная сумма ${light_blue}SHA-256${reset} не найдена в GitHub API, проверка пропущена\n"
+            return 0
+            ;;
+    esac
+
+    if ! command -v sha256sum >/dev/null 2>&1; then
+        printf "  ${yellow}Предупреждение${reset}: sha256sum не установлен, проверка контрольной суммы ${light_blue}SHA-256${reset} пропущена\n"
+        return 0
+    fi
+
+    _vis_actual=$(sha256sum "$_vis_file" 2>/dev/null | awk '{print $1}')
+    if [ "$_vis_actual" = "$_vis_expected" ]; then
+        printf "  Контрольная сумма ${light_blue}SHA-256${reset} файла %s ${green}проверена${reset}\n" "$_vis_asset"
+        return 0
+    fi
+
+    printf "  ${red}Ошибка${reset}: контрольная сумма ${light_blue}SHA-256${reset} файла %s не совпала с ожидаемой\n" "$_vis_asset"
+    return 1
+}
+
+# Функция патча установленной версии для совместимости с KeeneticOS 5.1.2
 # (замена "localhost" на "127.0.0.1" в rci-запросах)
 patch_localhost_compat() {
     local target_init_dir="/opt/etc/init.d"
@@ -100,7 +206,7 @@ patch_localhost_compat() {
     local init_path
 
     echo
-    printf "  Патчим файлы для совместимости с ${yellow}KeeneticOS 5.1.2+${reset}...\n\n"
+    printf "  Патчим файлы для совместимости с ${yellow}KeeneticOS 5.1.2${reset}...\n\n"
 
     for init_file in $target_init_files; do
         init_path="$target_init_dir/$init_file"
@@ -134,7 +240,7 @@ patch_localhost_compat() {
     if [ "$patched" -eq 1 ]; then
         printf "  ${green}Патч успешно применён${reset}\n"
     else
-        printf "  Патч не потребовался. XKeen совместим с ${yellow}KeeneticOS 5.1.2+${reset} либо не установлен\n"
+        printf "  Патч не потребовался. XKeen совместим с ${yellow}KeeneticOS 5.1.2${reset} либо не установлен\n"
     fi
 }
 
@@ -173,7 +279,7 @@ while [ $# -gt 0 ]; do
     esac
 done
 
-clear
+[ -t 1 ] && clear
 echo
 
 # Проверяем наличие пользовательского прокси в конфиге
@@ -185,10 +291,10 @@ fi
 if [ -z "$VERSION_TYPE" ]; then
     while true; do
         printf "  Какую версию ${yellow}XKeen${reset} вы хотите установить?\n\n"
-        printf "  1) Стабильную версию (${light_blue}Stable${reset}) только для ${yellow}KeeneticOS${reset} ${green}до${reset} ${yellow}5.1.2${reset}\n"
+        printf "  1) Стабильную версию (${light_blue}Stable${reset})\n"
         printf "  2) Новую Бета-версию (${light_blue}Beta${reset})\n"
         printf "  3) Предыдущую версию (${light_blue}Legacy${reset})\n"
-        printf "  4) Пропатчить установленную версию для совместимости с ${yellow}KeeneticOS 5.1.2+${reset}\n\n"
+        printf "  4) Пропатчить установленную версию для совместимости с ${yellow}KeeneticOS 5.1.2${reset}\n\n"
         printf "  0) Отмена\n\n"
         printf "  Выберите пункт меню [по умолчанию 1]: "
         read -r version_choice
@@ -245,7 +351,7 @@ if [ -z "$VERSION_TYPE" ]; then
                 exit 0
                 ;;
             *)
-                clear
+                [ -t 1 ] && clear
                 printf "\n  ${red}Неверный выбор.${reset} Пожалуйста, выберите пункт от 0 до 4.\n\n"
                 ;;
         esac
@@ -295,6 +401,11 @@ if ! download_xkeen_release "$url"; then
     exit 1
 fi
 
+if ! verify_install_sha256 "$archive_name" "$url"; then
+    rm -f "$archive_name"
+    exit 1
+fi
+
 stage_dir="/opt/sbin/.xkeen-install.$$"
 rm -rf "$stage_dir"
 mkdir -p "$stage_dir"
@@ -308,7 +419,15 @@ fi
 rm -f "$archive_name"
 
 chmod +x "$stage_dir/xkeen"
-if ! mv "$stage_dir/xkeen" /opt/sbin/xkeen.new || ! mv /opt/sbin/xkeen.new /opt/sbin/xkeen; then
+if ! mv "$stage_dir/xkeen" /opt/sbin/xkeen.new; then
+    rm -rf "$stage_dir" /opt/sbin/xkeen.new
+    printf "  ${red}Ошибка${reset}: после распаковки не найден исполняемый файл ${yellow}/opt/sbin/xkeen${reset}\n"
+    exit 1
+fi
+rm -f /opt/sbin/xkeen.old
+[ -f /opt/sbin/xkeen ] && mv /opt/sbin/xkeen /opt/sbin/xkeen.old
+if ! mv /opt/sbin/xkeen.new /opt/sbin/xkeen; then
+    [ -f /opt/sbin/xkeen.old ] && mv /opt/sbin/xkeen.old /opt/sbin/xkeen
     rm -rf "$stage_dir" /opt/sbin/xkeen.new
     printf "  ${red}Ошибка${reset}: после распаковки не найден исполняемый файл ${yellow}/opt/sbin/xkeen${reset}\n"
     exit 1
@@ -316,11 +435,13 @@ fi
 rm -rf /opt/sbin/.xkeen.old
 [ -d /opt/sbin/.xkeen ] && mv /opt/sbin/.xkeen /opt/sbin/.xkeen.old
 if ! mv "$stage_dir/_xkeen" /opt/sbin/.xkeen; then
+    [ -f /opt/sbin/xkeen.old ] && mv /opt/sbin/xkeen.old /opt/sbin/xkeen
     [ -d /opt/sbin/.xkeen.old ] && mv /opt/sbin/.xkeen.old /opt/sbin/.xkeen
     rm -rf "$stage_dir"
     printf "  ${red}Ошибка${reset}: не удалось установить модули XKeen\n"
     exit 1
 fi
+rm -f /opt/sbin/xkeen.old
 rm -rf /opt/sbin/.xkeen.old "$stage_dir"
 
 exec /opt/sbin/xkeen -i

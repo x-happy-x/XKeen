@@ -47,9 +47,13 @@ inject_fm() {
     target="$1"
     source_path="$2"
     tmp="$target.tmp"
+    # Оборачиваем значение в одинарные YAML-кавычки (спецсимволы вроде ':'
+    # иначе ломают парсинг front-matter), предварительно экранируя
+    # вложенные одинарные кавычки удвоением по правилу YAML.
+    esc_path=$(printf '%s' "$source_path" | sed "s/'/''/g")
     {
         echo '---'
-        echo "edit_url: $REPO_EDIT/$source_path"
+        echo "edit_url: '$REPO_EDIT/$esc_path'"
         echo '---'
         echo ''
         cat "$target"
@@ -104,7 +108,10 @@ done
 # Без этого <img src="images/..."> на страницах guides отдаёт 404.
 if [ -d "$ROOT/wiki/images" ]; then
     mkdir -p "$SRC/guides/images"
-    cp "$ROOT"/wiki/images/* "$SRC/guides/images/"
+    for img in "$ROOT"/wiki/images/*; do
+        [ -f "$img" ] || continue
+        cp "$img" "$SRC/guides/images/"
+    done
 fi
 
 # docs/*.md → авто-цикл. Исключения те же (_*.md, .gitignore — release-notes/ авто-скип).
@@ -188,6 +195,7 @@ find "$SRC/dev" -type f -name '*.md' -exec sed -i \
     -e "s|\.\./\.github/|$REPO_BLOB/.github/|g" \
     -e "s|\.\./install\.sh|$REPO_BLOB/install.sh|g" \
     -e "s|\.\./test/xkeen\.tar\.gz|$REPO_BLOB/test/xkeen.tar.gz|g" \
+    -e "s|\.\./test/changelog\.md|$REPO_BLOB/test/changelog.md|g" \
     -e "s|\.\./test/README\.md|beta-notes.md|g" \
     -e "s|\.\./wiki/FAQ\.md|../faq.md|g" \
     -e "s|\.\./wiki/Configuration\.md|../configuration.md|g" \

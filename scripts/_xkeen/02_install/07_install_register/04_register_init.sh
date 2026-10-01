@@ -22,10 +22,11 @@ name_chain="xkeen"
 name_ipset_deny_mac="xkeen_deny_mac"
 
 # Директории
-directory_os_modules="/lib/modules/$(uname -r)"
+_uname_r="$(uname -r)"
+directory_os_modules="/lib/modules/$_uname_r"
 directory_user_modules="/opt/lib/modules"
-directory_opkg_modules="/opt/lib/system-modules/$(uname -r)"
-directory_system_modules="/lib/system-modules/$(uname -r)"
+directory_opkg_modules="/opt/lib/system-modules/$_uname_r"
+directory_system_modules="/lib/system-modules/$_uname_r"
 directory_configs_app="/opt/etc/$name_client"
 directory_xray_config="$directory_configs_app/configs"
 directory_xray_asset="$directory_configs_app/dat"
@@ -52,41 +53,10 @@ ru_exclude_ipv4="$ipset_cfg/ru_exclude_ipv4.lst"
 ru_exclude_ipv6="$ipset_cfg/ru_exclude_ipv6.lst"
 ru_override="$ipset_cfg/ru_exclude_override.lst"
 
-# Runtime state must stay in tmpfs, but must never be created in a
-# world-writable location.  Recreate a squatted or incorrectly-modeled dir.
-_xkeen_secure_rundir() {
-    d="/tmp/.xkeen"
-    if [ -e "$d" ] && [ ! -d "$d" ]; then
-        rm -f "$d" 2>/dev/null
-    fi
-    if [ -d "$d" ]; then
-        set -- $(ls -ld "$d" 2>/dev/null)
-        mode="$1"
-        owner="$3"
-        if [ "$owner" != "root" ] || [ "$mode" != "drwx------" ]; then
-            rm -rf "$d" 2>/dev/null
-        fi
-    fi
-    [ -d "$d" ] || mkdir -m 700 "$d" 2>/dev/null || return 1
-    chmod 700 "$d" 2>/dev/null || return 1
-    printf '%s' "$d"
-}
-if ! xkeen_rundir=$(_xkeen_secure_rundir); then
-    case "$1" in
-        stop|status)
-            xkeen_rundir="/tmp/.xkeen-unavailable"
-            logger -p warning -t XKeen "Недоступен runtime-каталог; продолжаем $1 без runtime-state"
-            ;;
-        *)
-            exit 1
-            ;;
-    esac
-fi
-
 # URL
 url_server="127.0.0.1:79"
 url_policy="rci/show/ip/policy"
-url_keenetic_port="rci/ip/http"
+url_keenetic_port="rci/ip/http/ssl"
 url_redirect_port="rci/ip/static"
 url_hotspot="rci/show/ip/hotspot"
 
@@ -101,8 +71,8 @@ custom_mark=""
 
 # DSCP-метки
 dscp_enable="on"
-dscp_force_proxy="61"
 dscp_force_proxy_tag="force-proxy"
+dscp_force_proxy="61"
 dscp_exclude="62"
 dscp_proxy="63"
 
@@ -116,6 +86,8 @@ proxy_dns="off"
 
 # Проксирование трафика Entware
 proxy_router="off"
+# Cовместимость проксирования Entware с nfqws2
+nfqws_mark="0x40000000"
 
 # Строгая PBR-проверка mark / routing-mark
 pbr_strict="off"
@@ -126,6 +98,9 @@ start_attempts=10
 start_auto="on"
 start_delay=20
 init_delay=0
+
+# Сброс UDP-conntrack на DHCP renew
+udp_flush="on"
 
 # Контроль файловых дескрипторов
 check_fd="off"
@@ -145,6 +120,12 @@ backup="on"
 ## Клиенты XKeen под своими IP в журнале AdGuard Home
 aghfix="off"
 
+if [ "$dscp_enable" = "off" ]; then
+    dscp_force_proxy=""
+    dscp_exclude=""
+    dscp_proxy=""
+fi
+
 # Функции журналирования
 log_info_router() { logger -p notice -t "$name_app" "$1"; }
 log_warning_router() { logger -p warning -t "$name_app" "$1"; }
@@ -154,13 +135,43 @@ log_info_terminal() { echo -e "\n${green}Информация${reset}: $1" >&2; 
 log_warning_terminal() { echo -e "\n${yellow}Предупреждение${reset}: $1" >&2; }
 log_error_terminal() { echo -e "\n${red}Ошибка${reset}: $1" >&2; exit 1; }
 
-if [ "$dscp_enable" = "off" ]; then
-    dscp_force_proxy=""
-    dscp_exclude=""
-    dscp_proxy=""
+# Runtime state must stay in tmpfs, but must never be created in a
+# world-writable location.  Recreate a squatted or incorrectly-modeled dir.
+_xkeen_secure_rundir() {
+    d="/tmp/.xkeen"
+    if [ -e "$d" ] && [ ! -d "$d" ]; then
+        rm -f "$d" 2>/dev/null
+    fi
+    if [ -d "$d" ]; then
+        set -- $(ls -ld "$d" 2>/dev/null)
+        mode="$1"
+        owner="$3"
+        if [ "$owner" != "root" ] || [ "$mode" != "drwx------" ]; then
+            rm -rf "$d" 2>/dev/null
+        else
+            # Каталог уже существовал и прошёл проверку owner/mode —
+            # chmod не нужен, права и так верны.
+            printf '%s' "$d"
+            return 0
+        fi
+    fi
+    [ -d "$d" ] || mkdir -m 700 "$d" 2>/dev/null || return 1
+    chmod 700 "$d" 2>/dev/null || return 1
+    printf '%s' "$d"
+}
+if ! xkeen_rundir=$(_xkeen_secure_rundir); then
+    case "$1" in
+        stop|status)
+            xkeen_rundir="/tmp/.xkeen-unavailable"
+            log_warning_router "Недоступен runtime-каталог; продолжаем $1 без runtime-state"
+            ;;
+        *)
+            exit 1
+            ;;
+    esac
 fi
 
-# Дубль функции из 01_info_variable.sh: этот файл побайтово копируется в
+# Дубль функции из 01_info_common.sh: этот файл побайтово копируется в
 # init.d/S05xkeen и модули не подключает, поэтому правки нужны в обоих местах.
 # Обоснование разбора состоянием — там же.
 strip_json_comments() {
@@ -190,15 +201,33 @@ strip_json_comments() {
     }' "$@"
 }
 
-# Функция извлечения rci-токена
+# Кэш разобранного xkeen.json на время одного запуска процесса: файл за
+# время работы S05xkeen не меняется, поэтому strip_json_comments достаточно
+# выполнить один раз, а не при каждом обращении к xkeen.json.
+_xkeen_json_cache=""
+_xkeen_json_cache_set=0
+_xkeen_cached_json() {
+    [ "$_xkeen_json_cache_set" = 1 ] && { printf '%s' "$_xkeen_json_cache"; return; }
+    _xkeen_json_cache=$(strip_json_comments "$xkeen_config")
+    _xkeen_json_cache_set=1
+    printf '%s' "$_xkeen_json_cache"
+}
+# Прогреваем кэш бэровым (не в $()/пайпе) вызовом: все обращения к
+# _xkeen_cached_json ниже идут через $(...) или пайп, а это отдельный
+# subshell — переменные, выставленные внутри него, наружу не попадают.
+# Без этого прогрева каждый вызов ниже видел бы _xkeen_json_cache_set=0
+# из родительского процесса и заново форкал strip_json_comments.
+[ -f "$xkeen_config" ] && _xkeen_cached_json >/dev/null 2>&1
+
+# Функция извлечения rci-токена из xkeen.json
 get_rci_token() {
     rci_token=""
     [ ! -f "$xkeen_config" ] && return 1
 
     local json_clean
-    json_clean=$(strip_json_comments "$xkeen_config")
+    json_clean=$(_xkeen_cached_json)
 
-    rci_token=$(printf '%s' "$json_clean" | sed -n 's/.*"rci_token": *"\([^"]*\)".*/\1/p' | xargs 2>/dev/null)
+    rci_token=$(printf '%s' "$json_clean" | sed -n 's/.*"rci_token": *"\([^"]*\)".*/\1/p' | sed 's/^[[:space:]]*//; s/[[:space:]]*$//' 2>/dev/null)
 
     [ "$rci_token" = "null" ] && rci_token=""
 }
@@ -212,7 +241,7 @@ load_killswitch_settings() {
     [ -f "$xkeen_config" ] || return 0
     command -v jq >/dev/null 2>&1 || return 0
 
-    _ks_v=$(strip_json_comments "$xkeen_config" | jq -r '.xkeen.killswitch // "off"' 2>/dev/null)
+    _ks_v=$(_xkeen_cached_json | jq -r '.xkeen.killswitch // "off"' 2>/dev/null)
 
     [ "$_ks_v" = "on" ] && killswitch="on"
 }
@@ -228,7 +257,7 @@ load_gomemlimit_settings() {
     [ ! -f "$xkeen_config" ] && return 0
     command -v jq >/dev/null 2>&1 || return 0
 
-    _gml_json=$(strip_json_comments "$xkeen_config")
+    _gml_json=$(_xkeen_cached_json)
     _gml_v=$(printf '%s' "$_gml_json" | jq -r '.xkeen.mihomo.gomemlimit_percent // empty' 2>/dev/null)
     if [ -n "$_gml_v" ] && [ "$_gml_v" -ge 1 ] 2>/dev/null && [ "$_gml_v" -le 90 ] 2>/dev/null; then
         gomemlimit_percent="$_gml_v"
@@ -269,7 +298,7 @@ wait_for_webui() {
 
     while [ "$i" -lt "$max_wait" ]; do
         pidof nginx >/dev/null 2>&1 && return 0
-        sleep 1
+        sleep 2
         i=$((i + 1))
     done
 
@@ -284,23 +313,46 @@ wait_for_rci_token() {
         return 1
     }
 
-    http_code=$(curl -ksS -o /dev/null -w "%{http_code}" -H "X-Ndma-Tkn: $rci_token" "${url_server}/${url_policy}")
+    # nginx-процесс может подняться раньше, чем сам RCI-демон начнёт
+    # отвечать на запросы (асинхронная инициализация служб NDM), поэтому
+    # даём RCI до ~20 сек на "прогрев" и ретраим именно код 000 / прочие
+    # временные коды. 401/403 — это уже реальная проблема токена, здесь
+    # ретраить бессмысленно, выходим сразу.
+    _rci_wait_attempts=20
+    _rci_wait_i=0
+    while [ "$_rci_wait_i" -lt "$_rci_wait_attempts" ]; do
+        http_code=$(curl -ksS -o /dev/null -w "%{http_code}" --connect-timeout 2 -m 5 -H "X-Ndma-Tkn: $rci_token" "${url_server}/${url_policy}")
 
-    case "$http_code" in
-        200) return 0 ;;
-        401|403)
-            log_error_router "Отсутствует или недействителен токен доступа к RCI роутера"
-            log_error_terminal "Отсутствует или недействителен токен доступа к RCI роутера"
-            ;;
-        *)
-            log_error_router "RCI не отвечает (http_code=$http_code)"
-            log_error_terminal "RCI не отвечает (http_code=$http_code)"
-            ;;
-    esac
+        case "$http_code" in
+            200) return 0 ;;
+            401|403)
+                log_error_router "Отсутствует или недействителен токен доступа к RCI роутера"
+                log_error_terminal "Отсутствует или недействителен токен доступа к RCI роутера"
+                ;;
+        esac
+
+        _rci_wait_i=$((_rci_wait_i + 1))
+        sleep 1
+
+    done
+
+    log_error_router "RCI не отвечает (http_code=$http_code)"
+    log_error_terminal "RCI не отвечает (http_code=$http_code)"
 }
-wait_for_rci_token
+# stop/status не используют curl_api (proxy_stop/proxy_status/clean_firewall
+# работают только с pidof/iptables), поэтому недействительный rci_token не
+# должен блокировать аварийную остановку и проверку статуса (killswitch-
+# инвариант из wiki/Конфигурационный-файл.md). restart/start/cold_start
+# зависят от RCI через proxy_start -> api_cache_init -> curl_api, там
+# проверка остаётся обязательной.
+case "$1" in
+    stop|status) : ;;
+    *) wait_for_rci_token ;;
+esac
 
 # Параметры curl
+# Дубль функции: см. также строку ~2221 этого файла (heredoc proxy.sh) и
+# 01_info_common.sh:curl_api — правь все три места синхронно.
 curl_api() {
     if [ -n "$rci_token" ]; then
         curl --connect-timeout 2 -m 5 -kfsS -H "X-Ndma-Tkn: $rci_token" "$@"
@@ -409,13 +461,13 @@ ${custom_details}"
     fi
 }
 
-utils="jq curl grep awk sed ipset ip"
+utils="jq curl grep awk sed ipset ip logger"
 [ "$name_client" = "mihomo" ] && utils="$utils yq"
 for cmd in $utils; do
     command -v "$cmd" >/dev/null 2>&1 || log_error_terminal "Не найдена необходимая утилита: ${yellow}$cmd${reset}"
 done
 
-if readlink $(which ip) | grep -q 'busybox'; then
+if readlink "$(which ip)" | grep -q 'busybox'; then
     log_error_terminal "Обнаружена урезанная версия ip (BusyBox). Необходим пакет: ${yellow}ip-full${reset}"
 fi
 
@@ -441,32 +493,30 @@ api_cache_init() {
     api_static_json=$(curl_api "${url_server}/${url_redirect_port}" 2>/dev/null)
 }
 
-refresh_port_cache() { api_port_json=$(curl_api "${url_server}/${url_keenetic_port}" 2>/dev/null); }
+json_get_ports() { [ -n "$api_port_json" ] && printf '%s' "$api_port_json" | jq -r '(.port // 443)' 2>/dev/null; }
 
-json_get_ports() { [ -n "$api_port_json" ] && printf '%s' "$api_port_json" | jq -r '.port, (.ssl.port // empty)' 2>/dev/null; }
-
-# Получение портов Keenetic
+# Получение ssl порта Keenetic
 get_keenetic_port() {
     ports=""
     ports=$(json_get_ports)
-
     case " $ports " in
         *" 443 "*) return 1 ;;
     esac
-
-    if [ -z "$ports" ]; then
-        ndmc -c 'ip http port 8080' >/dev/null 2>&1
-        ndmc -c 'ip http port 80' >/dev/null 2>&1
-        ndmc -c 'system configuration save' >/dev/null 2>&1
-        sleep 2
-        refresh_port_cache
-        ports=$(json_get_ports)
-    fi
-
     [ -n "$ports" ] || return 1
-
     echo "$ports"
     return 0
+}
+
+check_ipv6_active() {
+    [ -r /proc/net/if_inet6 ] || return 1
+    awk '
+        $4 == "20" {
+            name = $6
+            if (name ~ /^ezcfg0$/ || name ~ /^t2s/) next
+            found = 1
+        }
+        END { exit !found }
+    ' /proc/net/if_inet6
 }
 
 apply_ipv6_state() {
@@ -477,7 +527,7 @@ apply_ipv6_state() {
 
     [ "$ipv6_support" != "off" ] && return 0
 
-    ip -6 addr show 2>/dev/null | grep -q "inet6 fe80::" || return 0
+    check_ipv6_active || return 0
 
     sysctl -w net.ipv6.conf.default.disable_ipv6=1 >/dev/null 2>&1
 
@@ -505,7 +555,7 @@ apply_ipv6_state() {
 
 get_ipver_support() {
     ip4_supported=$(ip -4 addr show 2>/dev/null | grep -q "inet " && echo true || echo false)
-    ip6_supported=$(ip -6 addr show 2>/dev/null | grep -q "inet6 fe80::" && echo true || echo false)
+    ip6_supported=$(check_ipv6_active && echo true || echo false)
 
     iptables_supported=$([ "$ip4_supported" = "true" ] && command -v iptables >/dev/null 2>&1 && echo true || echo false)
     ip6tables_supported=$([ "$ip6_supported" = "true" ] && command -v ip6tables >/dev/null 2>&1 && echo true || echo false)
@@ -540,7 +590,7 @@ format_routing_mark_items() {
 validate_xkeen_json() {
     [ ! -f "$xkeen_config" ] && return 0
 
-    if ! strip_json_comments "$xkeen_config" | jq -e . >/dev/null 2>&1; then
+    if ! _xkeen_cached_json | jq -e . >/dev/null 2>&1; then
         log_error_terminal "
   Валидация JSON: файл '${yellow}xkeen.json${reset}' содержит синтаксические ошибки
   Запуск прокси невозможен
@@ -560,7 +610,7 @@ validate_xkeen_json() {
       end
     '
 
-    if ! strip_json_comments "$xkeen_config" | jq -e "$jq_check" >/dev/null 2>&1; then
+    if ! _xkeen_cached_json | jq -e "$jq_check" >/dev/null 2>&1; then
         log_error_terminal "
   Файл '${yellow}xkeen.json${reset}' имеет неверную структуру
   Запуск прокси невозможен
@@ -1064,30 +1114,45 @@ process_user_ports() {
 }
 
 # Функция нормализации сторонних политик
-process_custom_mark() {
-    [ -n "$custom_mark" ] || return
-
+process_mark_var() {
+    local var_name="$1"
+    local current_marks
     local clean_mark=""
     local val
+    local mask
     local mark
     local IFS=', '
 
-    for mark in $custom_mark; do
+    eval "current_marks=\"\$$var_name\""
+    [ -n "$current_marks" ] || return
+
+    for mark in $current_marks; do
         [ -n "$mark" ] || continue
 
-        val=${mark#0x}
+        case "$mark" in
+            */*) val=${mark%%/*}; mask=${mark#*/} ;;
+            *)   val="$mark";     mask="" ;;
+        esac
+
+        val=${val#0x}
         val=${val#0X}
+        mask=${mask#0x}
+        mask=${mask#0X}
 
         case "$val" in
-            ''|*[!0-9a-fA-F]*)
-                ;;
-            *)
-                clean_mark="$clean_mark 0x$val"
-                ;;
+            ''|*[!0-9a-fA-F]*) continue ;;
+        esac
+
+        case "$mask" in
+            '')             clean_mark="$clean_mark 0x$val" ;;
+            *[!0-9a-fA-F]*) continue ;;
+            *)              clean_mark="$clean_mark 0x$val/0x$mask" ;;
         esac
     done
 
-    custom_mark=${clean_mark# }
+    clean_mark=${clean_mark# }
+    [ -n "$clean_mark" ] || log_warning_router "Значение $var_name отброшено при нормализации, правила для этой метки не создаются"
+    eval "$var_name=\"\$clean_mark\""
 }
 
 # Проверка статуса прокси-клиента
@@ -1323,21 +1388,6 @@ get_xray_network_by_mode() {
     echo "$network"
 }
 
-get_xray_port_by_tag() {
-    tag="$1"
-    port=$(
-        get_xray_transparent_inbounds |
-        awk -F '\t' -v tag="$tag" '
-            $4 == tag && $2 != "" {
-                print $2
-                exit
-            }
-        '
-    )
-
-    echo "$port"
-}
-
 get_xray_port_by_tag_mode() {
     tag="$1"
     mode="$2"
@@ -1352,21 +1402,6 @@ get_xray_port_by_tag_mode() {
     )
 
     echo "$port"
-}
-
-get_xray_mode_by_tag() {
-    tag="$1"
-    mode=$(
-        get_xray_transparent_inbounds |
-        awk -F '\t' -v tag="$tag" '
-            $4 == tag && $1 != "" {
-                print $1
-                exit
-            }
-        '
-    )
-
-    echo "$mode"
 }
 
 get_xray_network_by_tag_mode() {
@@ -1406,53 +1441,42 @@ get_xray_network_by_tag_mode() {
     echo "$network"
 }
 
-get_xray_network_by_tag() {
-    tag="$1"
-    network=$(
-        get_xray_transparent_inbounds |
-        awk -F '\t' -v tag="$tag" '
-            function add_networks(value, count, i, item) {
-                gsub(/,/, " ", value)
-                gsub(/^[[:space:]]+|[[:space:]]+$/, "", value)
-                if (value == "") {
-                    return
-                }
+# Кэш разбора config.yaml Mihomo (listeners+rules) с mtime-инвалидацией
+# по единственному файлу конфига — тот же паттерн, что у get_xray_transparent_inbounds,
+# но без проекции: горячему пути resolve_dscp_force_proxy() нужны разные поля
+# разных listener'ов, поэтому кэшируется весь JSON, а выборки идут через jq.
+_invalidate_mihomo_config_cache() { rm -f "$xkeen_rundir/mihomo-config-cache"; }
 
-                count = split(value, items, /[[:space:]]+/)
-                for (i = 1; i <= count; i++) {
-                    item = items[i]
-                    if (item != "" && !seen[item]++) {
-                        order[++order_count] = item
-                    }
-                }
-            }
-
-            $4 == tag {
-                add_networks($3)
-            }
-
-            END {
-                for (i = 1; i <= order_count; i++) {
-                    printf "%s%s", order[i], (i < order_count ? " " : "")
-                }
-            }
-        '
-    )
-
-    echo "$network"
+get_mihomo_config_cache() {
+    cache_file="$xkeen_rundir/mihomo-config-cache"
+    cache_valid=0
+    if [ -f "$cache_file" ]; then
+        newer=$(find "$mihomo_config" -newer "$cache_file" 2>/dev/null | head -n 1)
+        [ -z "$newer" ] && cache_valid=1
+    fi
+    if [ "$cache_valid" = "1" ]; then
+        cat "$cache_file"
+        return 0
+    fi
+    cache_tmp="${cache_file}.tmp.$$"
+    yq -o=json '.' "$mihomo_config" >"$cache_tmp" 2>/dev/null
+    mv "$cache_tmp" "$cache_file"
+    cat "$cache_file"
 }
 
 get_mihomo_listener_field_by_name() {
     listener_name="$1"
     field_name="$2"
 
-    DSCP_FORCE_LISTENER="$listener_name" yq ".listeners[] | select(.name == strenv(DSCP_FORCE_LISTENER)) | .$field_name // \"\"" "$mihomo_config" 2>/dev/null | sed -n '1p'
+    get_mihomo_config_cache | jq -r --arg name "$listener_name" --arg field "$field_name" '
+        .listeners[]? | select(.name == $name) | .[$field] // ""
+    ' 2>/dev/null | sed -n '1p'
 }
 
 get_mihomo_listener_rule_proxy_by_name() {
     listener_name="$1"
 
-    yq '.rules[] // ""' "$mihomo_config" 2>/dev/null | awk -F',' -v tag="$listener_name" '
+    get_mihomo_config_cache | jq -r '.rules[]? // empty' 2>/dev/null | awk -F',' -v tag="$listener_name" '
         {
             gsub(/^[[:space:]]+|[[:space:]]+$/, "", $1)
             gsub(/^[[:space:]]+|[[:space:]]+$/, "", $2)
@@ -1462,9 +1486,15 @@ get_mihomo_listener_rule_proxy_by_name() {
     '
 }
 
+# listener_type вторым аргументом — если вызывающий код (find_dscp_force_listener)
+# уже получил type тем же get_mihomo_listener_field_by_name, повторный запрос не нужен.
 get_mihomo_listener_network_by_name() {
     listener_name="$1"
-    listener_type=$(get_mihomo_listener_field_by_name "$listener_name" "type")
+    if [ "$#" -ge 2 ]; then
+        listener_type="$2"
+    else
+        listener_type=$(get_mihomo_listener_field_by_name "$listener_name" "type")
+    fi
 
     case "$listener_type" in
         redir)
@@ -1582,7 +1612,16 @@ resolve_dscp_force_proxy() {
     port_dscp_force_proxy_tproxy=""
     network_dscp_force_proxy_tproxy=""
 
-    if [ ! -n "$dscp_force_proxy" ] && [ ! -n "$name_policy_full" ]; then
+    # Регрессия a889bf3: тут был name_policy_full (константа "xkeen_full",
+    # никогда не пустая) вместо policy_mark_full (реальный runtime-mark
+    # политики) — условие было математически недостижимо.
+    # Известное ограничение: в ветке `case "$1" in dscp)` (команда
+    # `xkeen -dscp`) policy_mark_full не вычисляется (там нет api_cache_init
+    # и get_policy_mark, они есть только внутри proxy_start) — в редком
+    # сценарии dscp_enable=on + dscp_force_proxy вручную обнулён в конфиге +
+    # активна политика xkeen_full статус в этой ветке CLI может быть
+    # неточным. Это существующее ограничение, а не новая регрессия.
+    if [ -z "$dscp_force_proxy" ] && [ -z "$policy_mark_full" ]; then
         dscp_force_proxy_status="disabled"
         dscp_force_proxy_reason="метка и политика отключены в конфиге XKeen"
         return 1
@@ -1612,7 +1651,7 @@ resolve_dscp_force_proxy() {
             port_lookup=$(get_mihomo_listener_field_by_name "$listener_name" "port")
             mode_lookup=$(get_mihomo_listener_field_by_name "$listener_name" "type")
             proxy_lookup=$(get_mihomo_listener_field_by_name "$listener_name" "proxy")
-            network_lookup=$(normalize_network_list "$(get_mihomo_listener_network_by_name "$listener_name")")
+            network_lookup=$(normalize_network_list "$(get_mihomo_listener_network_by_name "$listener_name" "$mode_lookup")")
             if [ -n "$port_lookup" ] || [ -n "$mode_lookup" ] || [ -n "$proxy_lookup" ]; then
                 dscp_force_found_tag="$listener_name"
                 dscp_force_found_port="$port_lookup"
@@ -1916,7 +1955,13 @@ get_port_exclude() {
     echo "$port_exclude_result"
 }
 
-# Получение исключений IPv4
+# Получение исключений IPv4.
+# Этот файл — standalone-генератор: не sourcer'ится, копируется целиком
+# в /opt/etc/init.d/S05xkeen (cp в 02_register_xkeen.sh). Контракт: echo
+# объединённого списка /32-CIDR (провайдерский IP + $ipv4_exclude).
+# В 03_tools_diagnostic.sh есть одноимённая, но семантически независимая
+# функция (side-effect без CIDR, для маскировки IP) — тело между файлами
+# не копировать.
 get_exclude_ip4() {
     [ "$iptables_supported" != "true" ] && return
 
@@ -1927,7 +1972,13 @@ get_exclude_ip4() {
     echo "${ipv4_eth} ${ipv4_exclude}" | tr ' ' '\n' | awk '!seen[$0]++' | tr '\n' ' ' | sed 's/^ //; s/ $//'
 }
 
-# Получение исключений IPv6
+# Получение исключений IPv6.
+# Этот файл — standalone-генератор: не sourcer'ится, копируется целиком
+# в /opt/etc/init.d/S05xkeen (cp в 02_register_xkeen.sh). Контракт: echo
+# объединённого списка /128-CIDR (провайдерский IP + $ipv6_exclude).
+# В 03_tools_diagnostic.sh есть одноимённая, но семантически независимая
+# функция (side-effect без CIDR, для маскировки IP) — тело между файлами
+# не копировать.
 get_exclude_ip6() {
     [ "$ip6tables_supported" != "true" ] && return
 
@@ -1998,29 +2049,32 @@ sync_deny_mac_ipset() {
         unset _xkeen_deny_tmp _xkeen_hotspot_json
         return 0
     fi
-    printf '%s' "$_xkeen_hotspot_json" | jq -r '
+    if printf '%s' "$_xkeen_hotspot_json" | jq -r '
         ((.host // . // []) |
          (if type == "array" then .[] else . end)) |
         select((.access // "") == "deny" and (.mac // "") != "") |
         .mac
-    ' 2>/dev/null | tr '[:lower:]' '[:upper:]' | while IFS= read -r _xkeen_mac; do
-        [ -n "$_xkeen_mac" ] && ipset add "$_xkeen_deny_tmp" "$_xkeen_mac" -exist 2>/dev/null
-    done
-    ipset swap "$_xkeen_deny_tmp" "$name_ipset_deny_mac" 2>/dev/null
+    ' 2>/dev/null | tr '[:lower:]' '[:upper:]' | \
+         awk -v set="$_xkeen_deny_tmp" '/^([0-9A-F]{2}:){5}[0-9A-F]{2}$/ {print "add " set " " $0 " -exist"}' | \
+         ipset restore -exist; then
+        ipset swap "$_xkeen_deny_tmp" "$name_ipset_deny_mac" 2>/dev/null
+    else
+        log_warning_router "Не удалось восстановить $name_ipset_deny_mac из hotspot API"
+    fi
     ipset destroy "$_xkeen_deny_tmp" 2>/dev/null
-    unset _xkeen_deny_tmp _xkeen_hotspot_json _xkeen_mac
+    unset _xkeen_deny_tmp _xkeen_hotspot_json
 }
 
 # Получаем пользовательские политики
 get_user_policies() {
     [ ! -f "$xkeen_config" ] && return
-    strip_json_comments "$xkeen_config" | jq -r '.xkeen.policy[]? | "\(.name)|\(.port // "")" ' 2>/dev/null
+    _xkeen_cached_json | jq -r '.xkeen.policy[]? | "\(.name)|\(.port // "")" ' 2>/dev/null
 }
 
 # Проверка на конфликт имен политик
 check_policy_name_conflict() {
     if [ -f "$xkeen_config" ]; then
-        conflict=$(strip_json_comments "$xkeen_config" | jq -r \
+        conflict=$(_xkeen_cached_json | jq -r \
           --arg main "$name_policy" \
           --arg full "$name_policy_full" \
           '[ .xkeen.policy[] | select((.name | ascii_downcase) == ($main | ascii_downcase) or (.name | ascii_downcase) == ($full | ascii_downcase)) | .name ] | join(", ")' 2>/dev/null)
@@ -2044,7 +2098,7 @@ resolve_user_policies() {
     api_exclude_ports=$(get_api_exclude_ports)
 
     # Получаем сопоставленные политики одним вызовом jq
-    matched_policies=$(printf '%s' "$api_policy_json" | jq -r --argjson user_cfg "$(strip_json_comments "$xkeen_config")" '
+    matched_policies=$(printf '%s' "$api_policy_json" | jq -r --argjson user_cfg "$(_xkeen_cached_json)" '
         ($user_cfg.xkeen.policy // []) as $up |
         .[] as $api |
         $up[] | 
@@ -2116,12 +2170,17 @@ configure_firewall() {
     cat > "$file_netfilter_hook" <<'EOL'
 #!/bin/sh
 # XKeen: Auto-generated file. DO NOT EDIT!
+PATH="/opt/bin:/opt/sbin:/sbin:/bin:/usr/sbin:/usr/bin"
 _xkeen_secure_rundir() {
     d="/tmp/.xkeen"
     if [ -e "$d" ] && [ ! -d "$d" ]; then rm -f "$d" 2>/dev/null; fi
     if [ -d "$d" ]; then
         set -- $(ls -ld "$d" 2>/dev/null)
-        [ "$3" = "root" ] && [ "$1" = "drwx------" ] || rm -rf "$d" 2>/dev/null
+        if [ "$3" = "root" ] && [ "$1" = "drwx------" ]; then
+            printf '%s' "$d"
+            return 0
+        fi
+        rm -rf "$d" 2>/dev/null
     fi
     [ -d "$d" ] || mkdir -m 700 "$d" 2>/dev/null || return 1
     chmod 700 "$d" 2>/dev/null || return 1
@@ -2133,6 +2192,9 @@ case "${table:-}" in filter|raw) exit 0 ;; esac
 EOL
 
     # Securely inject variables into the script
+    # ${val//\'/...} — намеренная bash-совместимая экспансия: busybox ash по умолчанию собран с CONFIG_ASH_BASH_COMPAT=y и в upstream (shell/ash.c), и в Entware (Config-defaults.in).
+    # POSIX-замена printf|sed уже пробовалась и дважды откатывалась апстримом (e3c0d54→c28e73d, PR #44): лишний форк на каждый из ~40 вызовов за генерацию хука (KN-3812: 5.01s→4.78s без него), плюс command substitution обрезает trailing \n, чего parameter expansion не делает.
+    # Не переоткрывать без багрепорта с реального устройства, где expansion фактически не работает.
     inject_var() {
         local name="$1"
         local val="$2"
@@ -2160,6 +2222,7 @@ EOL
     inject_var comment_tag "$comment_tag"
     inject_var comment "$comment"
     inject_var custom_mark "$custom_mark"
+    inject_var nfqws_mark "$nfqws_mark"
     inject_var dscp_exclude "$dscp_exclude"
     inject_var dscp_proxy "$dscp_proxy"
     inject_var dscp_force_proxy "$dscp_force_proxy"
@@ -2203,6 +2266,7 @@ EOL
     apply_gomemlimit
     inject_var gomemlimit_value "$gomemlimit_value"
     inject_var killswitch "$killswitch"
+    inject_var udp_flush "$udp_flush"
 
     cat >> "$file_netfilter_hook" <<'EOL'
 # Хук исполняется отдельным процессом и функций init-скрипта не видит,
@@ -2222,6 +2286,8 @@ restart_script() {
     exec /bin/sh "$0" "$@"
 }
 
+# Дубль функции: см. также top-level копию (~316) в 04_register_init.sh и
+# 01_info_common.sh:curl_api — правь все три места синхронно.
 curl_api() {
     if [ -n "$rci_token" ]; then
         curl --connect-timeout 2 -m 5 -kfsS -H "X-Ndma-Tkn: $rci_token" "$@"
@@ -2230,6 +2296,12 @@ curl_api() {
     fi
 }
 
+# Весь сгенерированный netfilter-хук (proxy.sh) — один compound-оператор
+# if/then/else/fi (открытие здесь, `else` и `fi` на нулевом уровне
+# вложенности ниже, обе ветки целиком, все функции внутри). ash обязан
+# полностью разобрать его на каждое событие netfilter.d/schedule.d,
+# прежде чем начать что-либо исполнять — в т.ч. fast-path выход
+# _xkeen_rules_intact ниже: он экономит только исполнение, не разбор.
 if pidof "$name_client" >/dev/null; then
 
     # Сериализация прогонов хука. NDM вызывает netfilter.d конкурентно —
@@ -2282,15 +2354,18 @@ if pidof "$name_client" >/dev/null; then
             ipset destroy "$_tmp" 2>/dev/null
             return 0
         fi
-        printf '%s' "$_hjson" | jq -r '
+        if printf '%s' "$_hjson" | jq -r '
             ((.host // . // []) |
              (if type == "array" then .[] else . end)) |
             select((.access // "") == "deny" and (.mac // "") != "") |
             .mac
-        ' 2>/dev/null | tr '[:lower:]' '[:upper:]' | while IFS= read -r _m; do
-            [ -n "$_m" ] && ipset add "$_tmp" "$_m" -exist 2>/dev/null
-        done
-        ipset swap "$_tmp" "$name_ipset_deny_mac" 2>/dev/null
+        ' 2>/dev/null | tr '[:lower:]' '[:upper:]' | \
+             awk -v set="$_tmp" '/^([0-9A-F]{2}:){5}[0-9A-F]{2}$/ {print "add " set " " $0 " -exist"}' | \
+             ipset restore -exist; then
+            ipset swap "$_tmp" "$name_ipset_deny_mac" 2>/dev/null
+        else
+            logger -p warning -t XKeen "Не удалось восстановить $name_ipset_deny_mac из hotspot API"
+        fi
         ipset destroy "$_tmp" 2>/dev/null
     }
     command -v ipset >/dev/null 2>&1 && ipset create "$name_ipset_deny_mac" hash:mac -exist 2>/dev/null
@@ -2392,26 +2467,26 @@ if pidof "$name_client" >/dev/null; then
         [ "$_family" = "ip6tables" ] && _restore_cmd="ip6tables-restore"
 
         # Отказ restore = таблица осталась без правил xkeen до следующего
-        # события netfilter, молча. Одна повторная попытка закрывает гонку
-        # с параллельной модификацией таблицы (delete-list строится по
-        # снапшоту iptables-save); стойкий отказ уходит в syslog — иначе
-        # диагностировать «прокси молча перестал перехватывать» нечем.
+        # события netfilter, молча. До двух повторных попыток с нарастающей
+        # паузой закрывают гонку с параллельной модификацией таблицы
+        # (delete-list строится по снапшоту iptables-save); стойкий отказ
+        # уходит в syslog — иначе диагностировать «прокси молча перестал
+        # перехватывать» нечем.
         _attempt=1
+        _max_attempts=3
         while :; do
             _restore_err=$(printf '%s\n' "$_blob" | "$_restore_cmd" --noflush 2>&1) && {
-                [ "$_attempt" -gt 1 ] && command -v logger >/dev/null 2>&1 && \
-                    logger -p daemon.notice -t xkeen \
-                        "$_restore_cmd $_table: applied on retry $_attempt"
+                [ "$_attempt" -gt 1 ] && \
+                logger -p notice -t XKeen "$_restore_cmd $_table: applied on retry $_attempt"
                 break
             }
-            if [ "$_attempt" -ge 2 ]; then
-                command -v logger >/dev/null 2>&1 && \
-                    logger -p daemon.err -t xkeen \
-                        "$_restore_cmd --noflush failed for $_table: $(printf '%s' "$_restore_err" | head -n1)"
+            if [ "$_attempt" -ge "$_max_attempts" ]; then
+                logger -p error -t XKeen \
+                "$_restore_cmd --noflush failed for $_table after $_attempt attempts: $(printf '%s' "$_restore_err" | head -n1)"
                 return 1
             fi
+            usleep $((200000 * _attempt)) 2>/dev/null || sleep "$_attempt"
             _attempt=$((_attempt + 1))
-            usleep 200000 2>/dev/null || sleep 1
         done
         return 0
     }
@@ -2421,6 +2496,22 @@ if pidof "$name_client" >/dev/null; then
         [ "$iptables_supported" = "true" ] && _xkeen_apply_table iptables mangle _xkeen_v4_mangle_rules || true
         [ "$ip6tables_supported" = "true" ] && _xkeen_apply_table ip6tables nat _xkeen_v6_nat_rules || true
         [ "$ip6tables_supported" = "true" ] && _xkeen_apply_table ip6tables mangle _xkeen_v6_mangle_rules || true
+    }
+
+    # Пока NDM держит цепочки снесёнными, пакет установленного UDP-потока
+    # может уйти по FORWARD, и его забрать сетевой ускоритель (PPE): дальше
+    # поток идёт мимо netfilter и после возврата правил не восстанавливается.
+    # Удаление conntrack-записи заставляет следующий пакет пройти через
+    # xkeen-цепочку заново и снимает offload-запись.
+    # TPROXY-потоки помечены в conntrack меткой $table_mark (CONNMARK --save-mark
+    # в xkeen-цепочке), поэтому удаляем записи именно по ней: NAT-нутые
+    # DIRECT-потоки (метки NDM) и собственные потоки роутера (mark 0) не
+    # затрагиваются. Только UDP: для TCP это привело бы к RST.
+    _xkeen_flush_udp_conntrack() {
+        [ "$udp_flush" = "on" ] || return 0
+        case "$mode_proxy" in TProxy|Hybrid) ;; *) return 0 ;; esac
+        command -v conntrack >/dev/null 2>&1 || return 0
+        conntrack -D -p udp -m "$(( table_mark ))" >/dev/null 2>&1
     }
 
     # Добавление правил-исключений
@@ -2463,6 +2554,10 @@ if pidof "$name_client" >/dev/null; then
         ipset create "$set_name" "$set_type" family "$ipset_family" -exist || return
 
         ipt -I "$chain" 1 -m set --match-set "$set_name" dst $comment -j RETURN >/dev/null 2>&1
+
+        if [ "$base_set" = "user_exclude" ]; then
+            ipt -I "$chain" 1 -m set --match-set "$set_name" src $comment -j RETURN >/dev/null 2>&1
+        fi
     }
 
     add_geo_exclude() {
@@ -2690,11 +2785,19 @@ if pidof "$name_client" >/dev/null; then
 
         [ -z "$ports" ] && return
 
-        num_ports=$(echo "$ports" | tr ',' '\n' | wc -l)
-        i=1
-        while [ "$i" -le "$num_ports" ]; do
-            end=$((i + 6))
-            chunk=$(echo "$ports" | tr ',' '\n' | sed -n "${i},${end}p" | tr '\n' ',' | sed 's/,$//')
+        remaining="$ports"
+        while [ -n "$remaining" ]; do
+            chunk=""
+            chunk_len=0
+            while [ "$chunk_len" -lt 7 ] && [ -n "$remaining" ]; do
+                port="${remaining%%,*}"
+                case "$remaining" in
+                    *,*) remaining="${remaining#*,}" ;;
+                    *) remaining="" ;;
+                esac
+                chunk="${chunk:+$chunk,}$port"
+                chunk_len=$((chunk_len + 1))
+            done
             [ -z "$chunk" ] && break
             if [ -n "$mark" ]; then
                 set -- -m connmark --mark "$mark" -m conntrack ! --ctstate INVALID -p "$net" -m multiport --dports "$chunk" $comment -j "$target"
@@ -2702,7 +2805,6 @@ if pidof "$name_client" >/dev/null; then
                 set -- -m conntrack ! --ctstate INVALID -p "$net" -m multiport --dports "$chunk" $comment -j "$target"
             fi
             ipt -A PREROUTING "$@" >/dev/null 2>&1
-            i=$((i + 7))
         done
     }
 
@@ -2846,6 +2948,15 @@ USER_POLICIES_EOF
             [ -n "$bypass_mark" ] && ipt -A "$out_chain" -m mark --mark "$bypass_mark" $comment -j RETURN >/dev/null 2>&1
         done
 
+        for nfqws_bypass_mark in $nfqws_mark; do
+            [ -n "$nfqws_bypass_mark" ] || continue
+            case "$nfqws_bypass_mark" in
+                */*) ;;
+                *) nfqws_bypass_mark="$nfqws_bypass_mark/$nfqws_bypass_mark" ;;
+            esac
+            ipt -A "$out_chain" -m mark --mark "$nfqws_bypass_mark" $comment -j RETURN >/dev/null 2>&1
+        done
+
         add_exclude_rules "$out_chain"
 
         add_ipset_exclude ext_exclude hash:ip
@@ -2928,6 +3039,10 @@ USER_POLICIES_EOF
         return 0
     }
 
+    # Этот fast-path сокращает только время выполнения ниже по коду —
+    # к моменту вызова ash уже полностью разобрал весь if/fi выше
+    # (см. комментарий у открывающего `if pidof`), включая ~700 строк
+    # full-rebuild-функций, определённых раньше этой точки.
     _xkeen_rules_intact() {
         [ -n "$_xkeen_hook_tables" ] || return 1
         if [ "$iptables_supported" = "true" ]; then
@@ -2954,7 +3069,7 @@ USER_POLICIES_EOF
              awk '{print "add '"$_rg_tmp"' "$1}' | ipset restore -exist; then
             ipset swap "$_rg_set" "$_rg_tmp" 2>/dev/null || return 1
         else
-            logger -p daemon.warning -t xkeen "не удалось восстановить $_rg_set из $_rg_file"
+            logger -p warning -t XKeen "Не удалось восстановить $_rg_set из $_rg_file"
         fi
         ipset destroy "$_rg_tmp" 2>/dev/null
     }
@@ -3065,6 +3180,7 @@ USER_POLICIES_EOF
         _xkeen_apply
         [ -n "$_xkeen_cur_wan" ] && printf '%s' "$_xkeen_cur_wan" > "$_xkeen_wan_state"
         _xkeen_release_nf_lock
+        _xkeen_flush_udp_conntrack
         _xkeen_sync_deny_mac_ipset
         exit 0
     fi
@@ -3121,6 +3237,7 @@ USER_POLICIES_EOF
     # правил и после снятия nf-lock: см. комментарий у _xkeen_sync_deny_mac_ipset.
     [ -n "$_xkeen_cur_wan" ] && printf '%s' "$_xkeen_cur_wan" > "$_xkeen_wan_state"
     _xkeen_release_nf_lock
+    _xkeen_flush_udp_conntrack
     _xkeen_sync_deny_mac_ipset
 else
     # mkdir-lock с PID: обычный touch-файл залипал навсегда после OOM
@@ -3180,25 +3297,41 @@ fi
 EOL
     sed -i '1,2!{/^[[:space:]]*#/d; /^[[:space:]]*$/d}' "$file_netfilter_hook"
     chmod 700 "$file_netfilter_hook"
-    mv -f "$file_netfilter_hook" "$_hook_live" || {
+    # Пропускаем перезапись, если итоговое содержимое не отличается от live:
+    # экономим запись на flash при повторных S05xkeen start от NDM.
+    if [ -f "$_hook_live" ] && [ "$(cat "$file_netfilter_hook")" = "$(cat "$_hook_live")" ]; then
         rm -f "$file_netfilter_hook"
-        file_netfilter_hook="$_hook_live"
-        log_error_router "Не удалось атомарно обновить netfilter-хук"
-        return 1
-    }
+    else
+        mv -f "$file_netfilter_hook" "$_hook_live" || {
+            rm -f "$file_netfilter_hook"
+            file_netfilter_hook="$_hook_live"
+            log_error_router "Не удалось атомарно обновить netfilter-хук"
+            return 1
+        }
+    fi
     file_netfilter_hook="$_hook_live"
 
     # Schedule.d-хук: NDM вызывает scripts/schedule.d при start/stop расписаний
     # (родительский контроль). Хук дёргает netfilter.d/proxy.sh, который
     # ре-синхронизирует ipset deny-MAC из актуального hotspot API.
+    # Тот же tmp+сравнение+atomic-mv паттерн, что и у proxy.sh выше: heredoc
+    # статичен, но голый exists-check "застынет" на старом содержимом после
+    # апгрейда XKeen, поэтому сравниваем содержимое, а не факт наличия файла.
     mkdir -p "$(dirname "$file_schedule_hook")" 2>/dev/null
-    cat > "$file_schedule_hook" <<'SCHEDULE_EOL'
+    _schedule_hook_tmp="${file_schedule_hook}.tmp.$$"
+    rm -f "$_schedule_hook_tmp"
+    cat > "$_schedule_hook_tmp" <<'SCHEDULE_EOL'
 #!/bin/sh
 # XKeen: re-sync deny MAC ipset on schedule start/stop. Auto-generated. DO NOT EDIT!
 [ "$1" = "start" ] || [ "$1" = "stop" ] || exit 0
 [ -x /opt/etc/ndm/netfilter.d/proxy.sh ] && /opt/etc/ndm/netfilter.d/proxy.sh
 SCHEDULE_EOL
-    chmod 755 "$file_schedule_hook"
+    if [ -f "$file_schedule_hook" ] && [ "$(cat "$_schedule_hook_tmp")" = "$(cat "$file_schedule_hook")" ]; then
+        rm -f "$_schedule_hook_tmp"
+    else
+        chmod 755 "$_schedule_hook_tmp"
+        mv -f "$_schedule_hook_tmp" "$file_schedule_hook"
+    fi
 
     return 0
 }
@@ -3298,17 +3431,22 @@ monitor_fd() {
         client_pid=$(pidof "$name_client" | awk '{print $1}')
         if [ -n "$client_pid" ] && [ -d "/proc/$client_pid/fd" ]; then
             limit=$(awk '/Max open files/ {print $4}' "/proc/$client_pid/limits")
-            set -- /proc/$client_pid/fd/*
-            [ -e "$1" ] || set --
-            current=$#
-            if [ "$limit" -gt 0 ] && [ "$current" -gt $((limit * 90 / 100)) ]; then
-                log_warning_router "$name_client открыл $current из $limit файловых дескрипторов, инициирован перезапуск"
-                rm -f "$file_pid_fd"
-                fd_out=true
-                proxy_stop
-                proxy_start "on"
-                exit 0
-            fi
+            case "$limit" in
+                ''|*[!0-9]*) ;;
+                *)
+                    set -- /proc/$client_pid/fd/*
+                    [ -e "$1" ] || set --
+                    current=$#
+                    if [ "$limit" -gt 0 ] && [ "$current" -gt $((limit * 90 / 100)) ]; then
+                        log_warning_router "$name_client открыл $current из $limit файловых дескрипторов, инициирован перезапуск"
+                        rm -f "$file_pid_fd"
+                        fd_out=true
+                        proxy_stop
+                        proxy_start "on"
+                        exit 0
+                    fi
+                    ;;
+            esac
         fi
         sleep "$delay_fd"
     done
@@ -3320,12 +3458,21 @@ load_ipset() {
     family="$3"
     tmp="${set}_tmp"
 
+    # Тот же паттерн, что и в load_user_ipset_family
+    if [ "$family" = "inet6" ]; then
+        addr_regex='([0-9a-fA-F]{0,4}:){1,7}[0-9a-fA-F]{0,4}(/[0-9]{1,3})?'
+    else
+        addr_regex='([0-9]{1,3}\.){3}[0-9]{1,3}(/[0-9]{1,2})?'
+    fi
+
     # Заполняем tmp; основной набор подменяется только после успешного restore
     ipset create "$set" hash:net family "$family" -exist
     ipset create "$tmp" hash:net family "$family" -exist
     ipset flush "$tmp"
 
-    if [ -f "$file" ] && sed -e 's/\r$//' -e 's/#.*//' -e '/^[[:space:]]*$/d' "$file" | awk '{print "add '"$tmp"' "$1}' | ipset restore -exist; then
+    if [ -f "$file" ] && sed -e 's/\r$//' -e 's/#.*//' -e '/^[[:space:]]*$/d' "$file" |
+       grep -Eo "$addr_regex" |
+       awk -v s="$tmp" '{print "add "s" "$1}' | ipset restore -exist; then
         ipset swap "$set" "$tmp"
     fi
     ipset destroy "$tmp"
@@ -3426,6 +3573,10 @@ _acquire_coldstart_guard() {
     # PID is written together with mkdir.  A guard without it is stale, not a
     # permanent denial of service.
     # PID exists but its process died → reclaim stale guard.
+    # Реcheck перед rm -rf: между чтением протухшего pid выше и этой строкой
+    # другой процесс мог успеть сделать свой mkdir+printf — не сносим чужой
+    # свежий lock.
+    [ "$(cat "$xkeen_rundir/coldstart.lock.d/pid" 2>/dev/null)" = "$_gpid" ] || return 1
     rm -rf "$xkeen_rundir/coldstart.lock.d"
     mkdir "$xkeen_rundir/coldstart.lock.d" 2>/dev/null || return 1
     printf '%s\n' "$$" > "$xkeen_rundir/coldstart.lock.d/pid"
@@ -3439,6 +3590,8 @@ _set_coldstart_pid() {
 }
 
 _release_coldstart_guard() {
+    _gpid=$(cat "$xkeen_rundir/coldstart.lock.d/pid" 2>/dev/null)
+    [ -z "$_gpid" ] || [ "$_gpid" = "$$" ] || return 0
     rm -rf "$xkeen_rundir/coldstart.lock.d"
     rm -f "$xkeen_rundir/coldstart.lock"
 }
@@ -3461,6 +3614,10 @@ _acquire_proxy_mutex() {
     if [ -n "$_mpid" ] && kill -0 "$_mpid" 2>/dev/null; then
         return 1
     fi
+    # Реcheck перед rm -rf: между чтением протухшего pid выше и этой строкой
+    # другой процесс мог успеть сделать свой mkdir+printf — не сносим чужой
+    # свежий lock.
+    [ "$(cat "$xkeen_rundir/proxy.mutex.d/pid" 2>/dev/null)" = "$_mpid" ] || return 1
     rm -rf "$xkeen_rundir/proxy.mutex.d"
     mkdir "$xkeen_rundir/proxy.mutex.d" 2>/dev/null || return 1
     printf '%s\n' "$$" > "$xkeen_rundir/proxy.mutex.d/pid"
@@ -3593,6 +3750,7 @@ proxy_start() {
     start_manual="$1"
     if [ "$start_manual" = "on" ] || [ "$start_auto" = "on" ]; then
         _invalidate_inbounds_cache
+        _invalidate_mihomo_config_cache
         apply_ipv6_state
         get_ipver_support
         info_health_binary
@@ -3621,7 +3779,8 @@ proxy_start() {
         log_clean
         sync_deny_mac_ipset
         process_user_ports
-        process_custom_mark
+        process_mark_var custom_mark
+        process_mark_var nfqws_mark
         detect_architecture
         port_redirect=$(get_port_redirect)
         network_redirect=$(get_network_redirect)
@@ -3660,9 +3819,9 @@ proxy_start() {
             fi
             configure_dscp_force_proxy
             if [ "$mode_proxy" = "TProxy" ]; then
-                keenetic_ssl="$(get_keenetic_port)" || {
+                get_keenetic_port >/dev/null || {
                     proxy_stop
-                    log_error_router "Порт 443 занят сервисами Keenetic"
+                    log_error_router "Порт 443 занят сервисами Keenetic. Запуск в режиме TProxy невозможен"
                     log_error_terminal "
   Необходимый для режима ${light_blue}TProxy${reset} ${red}443 порт занят${reset} сервисами Keenetic
 
@@ -3849,7 +4008,12 @@ proxy_start() {
 # подгружает асинхронно уже после ndmc-ready). $start_delay сохранён
 # как safety cap (FAQ #12).
 wait_for_ready() {
-    _max=$(( ${start_delay:-60} * 2 ))
+    # Срезаем ведущий ноль в $start_delay ("08"/"09")
+    # иначе трактуется как восьмеричный разбор и валит арифметику
+    val=${start_delay:-60}
+    val=${val#"${val%%[!0]*}"}
+    val=${val:-0}
+    _max=$(( val * 2 ))
     _attempt=0
     _probe_ko=$(find_module_path "xt_TPROXY.ko")
 
@@ -3940,6 +4104,7 @@ proxy_stop() {
 }
 
 # Менеджер команд
+_cmd_rc=0
 case "$1" in
     start)
         ipset create ext_exclude hash:ip family inet -exist
@@ -3957,8 +4122,9 @@ case "$1" in
             exit 0
         fi
         proxy_start "$2"
+        _cmd_rc=$?
     ;;
-    stop) proxy_stop ;;
+    stop) proxy_stop; _cmd_rc=$? ;;
     status)
         if proxy_status; then
             mode_proxy=""
@@ -3967,8 +4133,10 @@ case "$1" in
             fi
             [ -z "$mode_proxy" ] && mode_proxy="Other"
             echo -e "  Прокси-клиент ${yellow}$name_client${reset} ${green}запущен${reset} в режиме ${light_blue}$mode_proxy${reset}"
+            _cmd_rc=0
         else
             echo -e "  Прокси-клиент ${red}не запущен${reset}"
+            _cmd_rc=1
         fi
         ;;
     dscp)
@@ -3977,7 +4145,7 @@ case "$1" in
             print_dscp_force_proxy_status
         fi
         ;;
-    restart) proxy_stop; proxy_start "$2" ;;
+    restart) proxy_stop; proxy_start "$2"; _cmd_rc=$? ;;
     cold_start)
         # Подстраховка: переписываем PID guard'а на свой ($$) на случай,
         # если caller-S05xkeen умер до того, как успел _set_coldstart_pid "$!".
@@ -3992,7 +4160,10 @@ case "$1" in
         wait_for_ready
         proxy_start ""
         ;;
-    *) echo -e "  Команды: ${green}start${reset} | ${red}stop${reset} | ${yellow}restart${reset} | status" ;;
+    *)
+        echo -e "  Команды: ${green}start${reset} | ${red}stop${reset} | ${yellow}restart${reset} | status"
+        _cmd_rc=1
+        ;;
 esac
 
-exit 0
+exit "$_cmd_rc"

@@ -56,8 +56,11 @@ sb_api_addr="127.0.0.1:10085"				 # адрес gRPC api
 sb_probe_addr="127.0.0.1:10808"				 # адрес probe http-proxy
 sb_probe_intag="probe"					 # tag probe-inbound
 sb_rule_tag="xkeen-sb-probe"				 # ruleTag временного правила замера
-sb_rule_tmp="$tmp_dir/sb_probe_rule.json"		 # временный файл правила замера
 sb_log_file="$xray_log_dir/speed_balancer.log"		 # лог замеров и переключений
+# читается в 02_balancer_control.sh (SSoT); при линтинге файла переменных
+# по отдельности shellcheck не видит использования в другом файле.
+# shellcheck disable=SC2034
+sb_min_xray_version="26.1.23"				 # мин. версия Xray-core с `api lsrules` (RPC ListRule)
 
 # -------------------------------------
 # Ресурсы для проверки доступа в интернет
@@ -70,7 +73,7 @@ conn_IP2="77.88.44.55"
 # Требования к свободному месту на накопителе
 # -------------------------------------
 xray_free_space=42
-mihomo_free_space=60
+mihomo_free_space=70
 target_dir="/opt"
 
 # -------------------------------------
@@ -93,7 +96,7 @@ yq_workaround_dist_url="https://github.com/jameszeroX/yq/releases/latest/downloa
 gh_proxy1="https://gh-proxy.com"								# 1 прокси для загрузок с GitHub
 gh_proxy2="https://ghfast.top"									# 2 прокси для загрузок с GitHub
 
-yq_use_workaround="false"									# включить при возникноверии пробелем, подобных issue 2609
+yq_use_workaround="false"									# включить при возникновении проблем, подобных issue 2609
 yq_workaround_issue_url="https://github.com/mikefarah/yq/issues/2609"				# issue с поломанным релизом Yq
 
 # url для загрузки геофайлов

@@ -60,12 +60,20 @@ sb_node_list() {
 # чтобы прошлый замер не протёк в боевой роутинг.
 #
 # Размер test_url важен: endpoint Cloudflare __down отдаёт 403 на запрос
-# больше ~50 МБ, поэтому по умолчанию берётся 50 МБ. Для окна замера этого
+# больше ~50 МБ, поэтому по умолчанию берётся 10 МБ. Для окна замера этого
 # достаточно — медленная нода за max_time его не докачает, а быстрая
 # докачает, и в обоих случаях size/time даёт скорость.
 sb_measure_node() {
     local node size time code
     node="$1"
+    # sb_rule_tmp не объявлена в local: как и sb_rule_tag, она обычная
+    # переопределяемая переменная (см. spec/test_balancer.sh). Дефолт здесь,
+    # а не в 01_info_variable.sh: _xkeen_secure_rundir определена в
+    # 01_info_common.sh, который сорсится позже переменных, и путь не должен
+    # быть предсказуемым файлом прямо в общем /opt/tmp (в отличие от
+    # ktmp_dir/xtmp_dir/mtmp_dir, это уже подкаталоги). ${:-} гарантирует,
+    # что подстановка не вычисляется, если sb_rule_tmp уже задана снаружи.
+    sb_rule_tmp="${sb_rule_tmp:-$(_xkeen_secure_rundir)/sb_probe_rule.json.$$}"
 
     # без "type": "field" — поле deprecated с xray-core v1.8.10 и правилу не нужно
     printf '{"routing":{"rules":[{"ruleTag":"%s","inboundTag":["%s"],"outboundTag":"%s"}]}}' \

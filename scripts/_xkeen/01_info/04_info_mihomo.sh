@@ -22,7 +22,7 @@ info_mihomo() {
     info_version_yq
 
     if [ -x "$install_dir/mihomo" ]; then
-        mihomo_current_version=$("$install_dir/mihomo" -v 2>&1 | grep -oE 'v?[0-9]+\.[0-9]+\.[0-9]+' | sed 's/^v//' | head -1)
+        mihomo_current_version=$("$install_dir/mihomo" -v 2>&1 | grep -oE 'v?[0-9]+\.[0-9]+\.[0-9]+(-fork\.[0-9]+)?' | sed 's/^v//' | head -1)
 
         if [ -n "$mihomo_current_version" ]; then
             mihomo_installed="installed"

@@ -51,16 +51,22 @@ sh -n "$STAGE/S05xkeen"
 # Prepare the complete recovery list before interrupting the service.
 # Exclude accumulated old backups, but include profiles, provider files and tsnet state.
 (cd "${ROOT:-/}" && find opt/etc/mihomo -path opt/etc/mihomo/backup -prune -o -type f -print -o -type l -print) > "$BASE/paths.txt"
-for rel in opt/sbin/mihomo opt/sbin/xkeen opt/sbin/.xkeen opt/etc/init.d/S05xkeen opt/etc/xkeen opt/etc/ndm/netfilter.d/proxy.sh opt/etc/ndm/schedule.d/00-xkeen-hotspot-sync.sh; do
+for rel in opt/sbin/mihomo opt/sbin/xkeen opt/sbin/.xkeen opt/etc/init.d/S05xkeen opt/etc/xkeen; do
   [ ! -e "$ROOT/$rel" ] || printf '%s\n' "$rel" >> "$BASE/paths.txt"
 done
+# stop removes generated NDM hooks; save their active contents first.
+mkdir -p "$BASE/pre-stop/opt/etc/ndm"
+for rel in opt/etc/ndm/netfilter.d/proxy.sh opt/etc/ndm/schedule.d/00-xkeen-hotspot-sync.sh; do
+  if [ -f "$ROOT/$rel" ]; then
+    mkdir -p "$BASE/pre-stop/$(dirname "$rel")"
+    cp -p "$ROOT/$rel" "$BASE/pre-stop/$rel"
+  fi
+done
+tar -cf "$BASE/before.tar" -C "$BASE/pre-stop" opt
 # Files are snapshotted while stopped so BoltDB and embedded Tailscale state are consistent.
-"$SERVICE" stop >"$BASE/stop.log" 2>&1 || { "$SERVICE" start manual >>"$BASE/stop.log" 2>&1 || true; exit 1; }
 stopped=1
-if ! tar -cf "$BASE/before.tar" -C "${ROOT:-/}" -T "$BASE/paths.txt"; then
-  "$SERVICE" start manual >>"$BASE/stop.log" 2>&1 || true
-  exit 1
-fi
+"$SERVICE" stop >"$BASE/stop.log" 2>&1 || exit 1
+tar -rf "$BASE/before.tar" -C "${ROOT:-/}" -T "$BASE/paths.txt" || exit 1
 (cd "$BASE" && sha256sum before.tar > before.sha256)
 sh "$BASE/rollback.sh" --check >"$BASE/backup-check.log"
 armed=1

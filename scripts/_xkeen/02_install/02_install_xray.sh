@@ -110,7 +110,7 @@ install_xray() {
     fi
 
     rm -f "$install_dir/xray_bak"
-    echo -e "  Xray ${green}успешно установлен${reset}"
+    echo
 
     rm -f "$xray_archive"
     rm -rf "$xtmp_dir"
@@ -119,7 +119,7 @@ install_xray() {
     if [ -d "$xray_conf_dir" ]; then
         for file in "$xray_conf_dir"/*.json; do
             [ -f "$file" ] || continue
-            grep -qE '"transport"\s*:' "$file" && mv "$file" "${file}.obsolete"
+            grep -qE '"transport"[[:space:]]*:' "$file" && mv "$file" "${file}.obsolete"
         done
     fi
 

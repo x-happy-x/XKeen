@@ -1,55 +1,45 @@
 # Запрос на добавление ядер проксирования
 choice_add_proxy_cores() {
+    echo
+    echo -e "  Выберите ${yellow}ядро проксирования${reset} для загрузки и установки:"
+    echo
+    echo "     1. Xray"
+    echo "     2. Mihomo"
+    echo "     3. Xray + Mihomo"
+    echo
+    echo "     0. Пропустить загрузку ядра проксирования, если оно уже установлено"
+    echo
+
+    add_xray=false
+    add_mihomo=false
+
     while true; do
-        echo
-        echo -e "  Выберите ${yellow}ядро проксирования${reset} для загрузки и установки:"
-        echo
-        echo "     1. Xray"
-        echo "     2. Mihomo"
-        echo "     3. Xray + Mihomo"
-        echo
-        echo "     0. Пропустить загрузку ядра проксирования, если оно уже установлено"
-        echo
+        read -r -p "  Ваш выбор: " proxy_choice
 
-        valid_input=true
-        add_xray=false
-        add_mihomo=false
-
-        while true; do
-            read -r -p "  Ваш выбор: " proxy_choice
-            proxy_choice=$(echo "$proxy_choice" | sed 's/,/, /g')
-
-            if echo "$proxy_choice" | grep -qE '^[0-3]$'; then
-                break
-            else
-                echo -e "  ${red}Некорректный ввод.${reset} Выберите один из предложенных вариантов"
-            fi
-        done
-
-        case "$proxy_choice" in
-            1)
-                add_xray=true
-                ;;
-            2)
-                add_mihomo=true
-                ;;
-            3)
-                add_xray=true
-                add_mihomo=true
-                ;;
-            0)
-                echo "  Выполнен пропуск установки / обновления ядра проксирования"
-                add_xray=false
-                add_mihomo=false
-                ;;
-            *)
-                echo -e "  ${red}Некорректный ввод${reset}"
-                valid_input=false
-                ;;
-        esac
-
-        [ "$valid_input" = "true" ] && break
+        if echo "$proxy_choice" | grep -qE '^[0-3]$'; then
+            break
+        else
+            echo -e "  ${red}Некорректный ввод.${reset} Выберите один из предложенных вариантов"
+        fi
     done
+
+    case "$proxy_choice" in
+        1)
+            add_xray=true
+            ;;
+        2)
+            add_mihomo=true
+            ;;
+        3)
+            add_xray=true
+            add_mihomo=true
+            ;;
+        0)
+            echo "  Выполнен пропуск установки / обновления ядра проксирования"
+            add_xray=false
+            add_mihomo=false
+            ;;
+    esac
 }
 
 # Смена ядра проксирования на Xray
@@ -58,7 +48,13 @@ choice_xray_core() {
     if [ -f "$initd_file" ]; then
         if grep -q 'name_client="xray"' $initd_file; then
             echo -e " Смена ядра ${red}не выполнена${reset}. Устройство уже работает на ядре ${yellow}Xray${reset}"
-        elif grep -q 'name_client="mihomo"' $initd_file; then
+        elif [ -f "$install_dir/xray" ] && grep -q 'name_client="mihomo"' $initd_file; then
+            # pidof-гейт намеренно: вызывать $initd_file stop безусловно здесь бессмысленно —
+            # proxy_stop() (04_register_init.sh, ветка `if ! proxy_status`) сам содержит
+            # идентичный pidof-гейт вокруг clean_firewall и для уже мёртвого mihomo его всё равно
+            # не выполнит. Остаточные xkeen-tagged правила старого ядра безусловно вычищаются и
+            # пересобираются _xkeen_apply_table (04_register_init.sh) при следующем `xkeen -start`,
+            # который сообщение об успешной смене ядра ниже и так предписывает выполнить.
             if pidof "mihomo" >/dev/null; then
                 $initd_file stop
             fi
@@ -69,6 +65,7 @@ choice_xray_core() {
             echo -e "  И запустите проксирование командой ${yellow}xkeen -start${reset}"
         else
             echo -e " Произошла ${red}ошибка${reset} при смене ядра проксирования"
+            return 1
         fi
     else
         echo -e "  ${red}Ошибка${reset}: Не найден файл автозапуска ${yellow}S05xkeen${reset}"
@@ -84,6 +81,12 @@ choice_mihomo_core() {
         if grep -q 'name_client="mihomo"' $initd_file; then
             echo -e " Смена ядра ${red}не выполнена${reset}. Устройство уже работает на ядре ${yellow}Mihomo${reset}"
         elif [ -f "$install_dir/mihomo" ] && [ -f "$install_dir/yq" ] && grep -q 'name_client="xray"' $initd_file; then
+            # pidof-гейт намеренно: вызывать $initd_file stop безусловно здесь бессмысленно —
+            # proxy_stop() (04_register_init.sh, ветка `if ! proxy_status`) сам содержит
+            # идентичный pidof-гейт вокруг clean_firewall и для уже мёртвого xray его всё равно
+            # не выполнит. Остаточные xkeen-tagged правила старого ядра безусловно вычищаются и
+            # пересобираются _xkeen_apply_table (04_register_init.sh) при следующем `xkeen -start`,
+            # который сообщение об успешной смене ядра ниже и так предписывает выполнить.
             if pidof "xray" >/dev/null; then
                 $initd_file stop
             fi
@@ -94,6 +97,7 @@ choice_mihomo_core() {
             echo -e "  И запустите проксирование командой ${yellow}xkeen -start${reset}"
         else
             echo -e " Произошла ${red}ошибка${reset} при смене ядра проксирования"
+            return 1
         fi
     else
         echo -e "  ${red}Ошибка${reset}: Не найден файл автозапуска ${yellow}S05xkeen${reset}"

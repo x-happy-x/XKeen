@@ -4,7 +4,6 @@ register_cron_initd() {
     opkg list-installed 2>/dev/null | grep -q "^cron " && return
 
     # Определение переменных
-    s05crond_filename="${current_datetime}_S05crond"
     required_script_version="0.6"
 
     # Получение текущей версии скрипта
@@ -88,21 +87,19 @@ esac
 exit 0'
     
     # Создание или замена файла, если версия скрипта не соответствует требуемой версии 
-    if [ "${script_version}" != "${required_script_version}" ]; then 
-        echo -e "${script_content}" > "${initd_cron}" 
-        chmod +x "${initd_cron}" 
-    fi 
+    if [ "${script_version}" != "${required_script_version}" ]; then
+        tmp_initd_cron="${initd_cron}.tmp.$$"
+        echo -e "${script_content}" > "${tmp_initd_cron}"
+        mv -f "${tmp_initd_cron}" "${initd_cron}" || rm -f "${tmp_initd_cron}"
+        chmod +x "${initd_cron}"
+    fi
 }
 
 # Обновление cron задач
 update_cron_geofile_task() {
     if [ -f "$cron_dir/$cron_file" ]; then
         tmp_file="$cron_dir/${cron_file}.tmp.$$"
-        if [ -z "$choice_cancel_cron_select" ]; then
-            grep -v -E "($install_dir/xkeen[[:space:]]+-(ug|ux|uk))" "$cron_dir/$cron_file" > "$tmp_file"
-        else
-            grep -v -E "($install_dir/xkeen[[:space:]]+-(ugi|ugs|ux|uk))" "$cron_dir/$cron_file" > "$tmp_file"
-        fi
+        grep -v -E "($install_dir/xkeen[[:space:]]+-(ugi|ugs|ux|uk))" "$cron_dir/$cron_file" > "$tmp_file"
         mv -f "$tmp_file" "$cron_dir/$cron_file" || rm -f "$tmp_file"
     fi
 }

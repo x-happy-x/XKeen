@@ -56,8 +56,11 @@ sb_api_addr="127.0.0.1:10085"				 # адрес gRPC api
 sb_probe_addr="127.0.0.1:10808"				 # адрес probe http-proxy
 sb_probe_intag="probe"					 # tag probe-inbound
 sb_rule_tag="xkeen-sb-probe"				 # ruleTag временного правила замера
-sb_rule_tmp="$tmp_dir/sb_probe_rule.json"		 # временный файл правила замера
 sb_log_file="$xray_log_dir/speed_balancer.log"		 # лог замеров и переключений
+# читается в 02_balancer_control.sh (SSoT); при линтинге файла переменных
+# по отдельности shellcheck не видит использования в другом файле.
+# shellcheck disable=SC2034
+sb_min_xray_version="26.1.23"				 # мин. версия Xray-core с `api lsrules` (RPC ListRule)
 
 # -------------------------------------
 # Ресурсы для проверки доступа в интернет
@@ -70,22 +73,22 @@ conn_IP2="77.88.44.55"
 # Требования к свободному месту на накопителе
 # -------------------------------------
 xray_free_space=42
-mihomo_free_space=60
+mihomo_free_space=70
 target_dir="/opt"
 
 # -------------------------------------
 # URL
 # -------------------------------------
-xkeen_api_url="https://api.github.com/repos/jameszeroX/xkeen/releases/latest"			# url api для XKeen
-xkeen_jsd_url="https://data.jsdelivr.com/v1/package/gh/jameszeroX/xkeen"			# резервный url api для XKeen
-xkeen_tar_url="https://github.com/jameszeroX/XKeen/releases/latest/download/xkeen.tar.gz"	# url для загрузки XKeen
-xkeen_dev_url="https://raw.githubusercontent.com/jameszeroX/xkeen/main/test/xkeen.tar.gz"	# url для загрузки XKeen dev
+xkeen_api_url="https://api.github.com/repos/x-happy-x/XKeen/releases/latest"			# url api для XKeen
+xkeen_jsd_url="https://data.jsdelivr.com/v1/package/gh/x-happy-x/XKeen"			# резервный url api для XKeen
+xkeen_tar_url="https://github.com/x-happy-x/XKeen/releases/latest/download/xkeen.tar.gz"	# url для загрузки XKeen
+xkeen_dev_url="https://github.com/x-happy-x/XKeen/releases/latest/download/xkeen.tar.gz"	# url для загрузки XKeen dev
 xray_api_url="https://api.github.com/repos/XTLS/Xray-core/releases"				# url api для Xray
 xray_jsd_url="https://data.jsdelivr.com/v1/package/gh/XTLS/Xray-core"				# резервный url api для Xray
 xray_zip_url="https://github.com/XTLS/Xray-core/releases/download"				# url для загрузки Xray
-mihomo_api_url="https://api.github.com/repos/MetaCubeX/mihomo/releases"				# url api для Mihomo
-mihomo_jsd_url="https://data.jsdelivr.com/v1/package/gh/MetaCubeX/mihomo"			# резервный url api для Mihomo
-mihomo_gz_url="https://github.com/MetaCubeX/mihomo/releases/download"				# url для загрузки Mihomo
+mihomo_api_url="https://api.github.com/repos/x-happy-x/mihomo/releases"				# url api для Mihomo
+mihomo_jsd_url="https://data.jsdelivr.com/v1/package/gh/x-happy-x/mihomo"			# резервный url api для Mihomo
+mihomo_gz_url="https://github.com/x-happy-x/mihomo/releases/download"				# url для загрузки Mihomo
 yq_api_url="https://api.github.com/repos/mikefarah/yq/releases/latest"				# url api для оригинального Yq
 yq_workaround_api_url="https://api.github.com/repos/jameszeroX/yq/releases/latest"		# url api для рабочего Yq
 yq_upstream_dist_url="https://github.com/mikefarah/yq/releases/latest/download"			# url для загрузки оригинального Yq
@@ -93,7 +96,7 @@ yq_workaround_dist_url="https://github.com/jameszeroX/yq/releases/latest/downloa
 gh_proxy1="https://gh-proxy.com"								# 1 прокси для загрузок с GitHub
 gh_proxy2="https://ghfast.top"									# 2 прокси для загрузок с GitHub
 
-yq_use_workaround="false"									# включить при возникноверии пробелем, подобных issue 2609
+yq_use_workaround="false"									# включить при возникновении проблем, подобных issue 2609
 yq_workaround_issue_url="https://github.com/mikefarah/yq/issues/2609"				# issue с поломанным релизом Yq
 
 # url для загрузки геофайлов

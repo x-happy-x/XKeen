@@ -19,7 +19,7 @@ write_ports_file() {
     file="$1"
     ports="$2"
 
-    tmpfile=$(mktemp)
+    tmpfile="${file}.tmp.$$"
 
     echo "# XKeen ports list" > "$tmpfile"
     echo "$ports" | tr ',' '\n' >> "$tmpfile"
@@ -99,16 +99,16 @@ remove_ports_from_list() {
     current_ports="$1"
     ports_to_del="$2"
 
-    result="$current_ports"
+    echo "$current_ports" | tr ',' '\n' | awk -v del="$ports_to_del" '
+    BEGIN {
+        n = split(del, d, ",")
+        for (i = 1; i <= n; i++) delset[d[i]] = 1
+    }
 
-    for port in $(echo "$ports_to_del" | tr ',' '\n'); do
-        result=$(echo "$result" | tr ',' '\n' |
-            grep -vFx "$port" |
-            tr '\n' ',' |
-            sed 's/,$//')
-    done
-
-    echo "$result"
+    {
+        if (!($0 in delset)) print
+    }
+    ' | tr '\n' ',' | sed 's/,$//'
 }
 
 merge_ports_lists() {
@@ -147,7 +147,10 @@ confirm_deletion() {
 
     echo
     while true; do
-        read -r -p "  Ваш выбор: " choice
+        # Без TTY (cron, ssh без -t) read получает EOF: код возврата ненулевой,
+        # choice остаётся пустым, попадает в ветку * — while true крутится
+        # без блокировки на read, CPU-spin. Трактуем EOF как явный ввод 0.
+        read -r -p "  Ваш выбор: " choice || choice=0
             case "$choice" in
                 1) return 0 ;;
                 0) echo && echo "  Отменено пользователем"; return 1 ;;
@@ -317,8 +320,6 @@ migrate_ports_from_initd() {
     port_donor_val=$(normalize_ports "$port_donor_val")
     port_exclude_val=$(normalize_ports "$port_exclude_val")
 
-    migrated=0
-
     # Миграция port_donor
     if [ -n "$port_donor_val" ]; then
 
@@ -327,7 +328,7 @@ migrate_ports_from_initd() {
         combined=$(normalize_ports "$current_proxy,$port_donor_val")
 
         if [ "$combined" != "$current_proxy" ]; then
-            tmpfile=$(mktemp)
+            tmpfile="${file_port_proxying}.tmp.$$"
             echo "# XKeen port proxying list (migrated)" > "$tmpfile"
             echo "$combined" | tr ',' '\n' >> "$tmpfile"
             mv "$tmpfile" "$file_port_proxying"
@@ -342,7 +343,7 @@ migrate_ports_from_initd() {
         combined=$(normalize_ports "$current_exclude,$port_exclude_val")
 
         if [ "$combined" != "$current_exclude" ]; then
-            tmpfile=$(mktemp)
+            tmpfile="${file_port_exclude}.tmp.$$"
             echo "# XKeen port exclude list (migrated)" > "$tmpfile"
             echo "$combined" | tr ',' '\n' >> "$tmpfile"
             mv "$tmpfile" "$file_port_exclude"

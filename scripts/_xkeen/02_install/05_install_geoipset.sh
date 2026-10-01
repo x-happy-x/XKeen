@@ -11,7 +11,7 @@ _validate_geoipset_v4() {
 
 _validate_geoipset_v6() {
     _validate_default "$1" "$2" || return 1
-    if ! grep -q ":" "$1"; then
+    if ! grep -q "^[0-9a-fA-F]" "$1"; then
         _last_error="content_v6"
         return 1
     fi
@@ -43,9 +43,16 @@ install_geoipset_lst() {
 
     local tmp_file="${dest_file}.tmp.$$"
 
-    if _download_and_validate_loop "$url" "$tmp_file" "$expected_size" "$_validator_name" "$display_name"; then
+    # geoipv4_url/geoipv6_url всегда указывают на GitHub Release — проверка
+    # безусловна (в отличие от process_geo_file(), которая обслуживает ещё и
+    # произвольные пользовательские URL)
+    if _download_and_validate_loop "$url" "$tmp_file" "$expected_size" "$_validator_name" "$display_name" && verify_github_sha256 "$tmp_file" "$url"; then
         mv -f "$tmp_file" "$dest_file"
     else
+        if [ -f "$tmp_file" ]; then
+            rm -f "$tmp_file"
+            _last_error="sha256_mismatch"
+        fi
         # Обработка ошибок, если все попытки провалились
         case "$_last_error" in
             html_stub)
@@ -59,6 +66,9 @@ install_geoipset_lst() {
                 ;;
             size|size_mismatch)
                 printf "  ${red}Ошибка${reset}: Размер загруженного файла не соответствует ожидаемому\n"
+                ;;
+            sha256_mismatch)
+                printf "  ${red}Ошибка${reset}: Контрольная сумма SHA-256 файла %s не подтверждена\n" "$display_name"
                 ;;
             *)
                 local max_attempts=${retries_download:-1}
@@ -88,16 +98,72 @@ load_geoipset() {
     local file="$2"
     local family="$3"
     local tmp="${set}_tmp"
+    local addr_regex
+
+    # Тот же паттерн, что и в load_user_ipset_family (04_register_init.sh)
+    if [ "$family" = "inet6" ]; then
+        addr_regex='([0-9a-fA-F]{0,4}:){1,7}[0-9a-fA-F]{0,4}(/[0-9]{1,3})?'
+    else
+        addr_regex='([0-9]{1,3}\.){3}[0-9]{1,3}(/[0-9]{1,2})?'
+    fi
+
+    # Сериализация: cron `xkeen -ug`, ручной `xkeen -i/-gips` и new_features()
+    # (-uk_post_update/-k_post_install) сходятся здесь на общем tmp-наборе
+    # "${set}_tmp" — без лока параллельный create/flush/restore/swap/destroy
+    # молча теряет записи geo_exclude/geo_exclude6 у обоих участников.
+    # Тот же mkdir+pid-lock паттерн, что у _acquire_nf_lock в
+    # 04_register_init.sh: kill -0 снимает лок мёртвого держателя, короткое
+    # ограниченное ожидание уместно — restore идёт по уже скачанному
+    # локальному файлу, в отличие от многоминутной загрузки install/upgrade.
+    local _gi_rundir="" _gi_lockdir="" _gi_lock_owned="" _gi_try=0 _gi_lock_pid
+    _gi_rundir=$(_xkeen_secure_rundir)
+    if [ -n "$_gi_rundir" ]; then
+        _gi_lockdir="$_gi_rundir/geoipset.lock.d"
+        while [ "$_gi_try" -lt 50 ]; do
+            if mkdir "$_gi_lockdir" 2>/dev/null; then
+                _gi_lock_owned=1
+                printf '%s' "$$" > "$_gi_lockdir/pid"
+                break
+            fi
+            _gi_lock_pid=$(cat "$_gi_lockdir/pid" 2>/dev/null)
+            if [ -n "$_gi_lock_pid" ] && ! kill -0 "$_gi_lock_pid" 2>/dev/null; then
+                rm -rf "$_gi_lockdir" 2>/dev/null
+                continue
+            fi
+            _gi_try=$((_gi_try + 1))
+            usleep 100000 2>/dev/null || sleep 1
+        done
+        if [ -z "$_gi_lock_owned" ]; then
+            # Держатель лока жив и всё ещё внутри критической секции ~5с
+            # спустя (kill -0 проходил на каждой попытке выше — иначе лок
+            # был бы снят как stale и цикл продолжился бы). Не отбираем
+            # лок силой: это воссоздаёт ровно ту гонку (два живых процесса
+            # одновременно работают над одним "${set}_tmp"), которую лок
+            # должен закрывать. Пропускаем это обновление, оставляя
+            # текущий "$set" нетронутым.
+            printf "GeoIPSET: не удалось получить лок для '%s' — другой процесс ещё выполняет загрузку, обновление пропущено\n" "$set" >&2
+            return 1
+        fi
+        trap 'rm -rf "$_gi_lockdir" 2>/dev/null; exit 1' INT TERM
+        trap 'rm -rf "$_gi_lockdir" 2>/dev/null' EXIT
+    fi
 
     # Заполняем tmp; основной набор подменяется только после успешного restore
     ipset create "$set" hash:net family "$family" -exist
     ipset create "$tmp" hash:net family "$family" -exist
     ipset flush "$tmp"
 
-    if [ -f "$file" ] && awk '/^[0-9a-fA-F]/ {print "add '"$tmp"' "$1}' "$file" | ipset restore -exist; then
+    if [ -f "$file" ] && sed -e 's/\r$//' -e 's/#.*//' -e '/^[[:space:]]*$/d' "$file" |
+       grep -Eo "$addr_regex" |
+       awk -v s="$tmp" '{print "add "s" "$1}' | ipset restore -exist; then
         ipset swap "$set" "$tmp"
     fi
     ipset destroy "$tmp"
+
+    if [ -n "$_gi_lock_owned" ]; then
+        trap - EXIT
+        rm -rf "$_gi_lockdir" 2>/dev/null
+    fi
 }
 
 install_geoipset() {
@@ -148,7 +214,7 @@ install_geoipset() {
                 do_v4=1
             fi
         fi
-        if ip -6 addr show 2>/dev/null | grep -q "inet6 fe80::" && command -v ip6tables >/dev/null 2>&1; then
+        if check_ipv6_active && command -v ip6tables >/dev/null 2>&1; then
             if [ "$action" = "init" ] || [ -f "$ru_exclude_ipv6" ]; then
                 do_v6=1
             fi

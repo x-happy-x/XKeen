@@ -4,8 +4,39 @@ geofiles_update_state() {
     local json_clean
     json_clean=$(strip_json_comments "$xkeen_config")
     local val
-    val=$(printf '%s' "$json_clean" | sed -n 's/.*"geofile_update": *\([a-zA-Z]*\).*/\1/p' | xargs 2>/dev/null)
+    val=$(printf '%s' "$json_clean" | sed -n 's/.*"geofile_update": *\([a-zA-Z]*\).*/\1/p' | sed 's/^[[:space:]]*//; s/[[:space:]]*$//' 2>/dev/null)
     [ "$val" = "false" ] && geofile_update="false"
+}
+
+# Проверяет, что URL — стандартный GitHub Release asset-URL
+# (.../releases/latest/download/FILE или .../releases/download/TAG/FILE).
+# Нужна для process_geo_file(): она обслуживает не только фиксированные
+# GitHub-источники (geosite/geoip), но и произвольные пользовательские
+# URL из update_user_geofiles() (xkeen.json: .xkeen.xray.geodata[].url),
+# для которых verify_github_sha256 неприменима.
+_is_github_release_url() {
+    case "$1" in
+        https://github.com/*/releases/latest/download/*|https://github.com/*/releases/download/*/*)
+            return 0 ;;
+        *)
+            return 1 ;;
+    esac
+}
+
+# Проверяет, настроены ли у пользователя собственные geodata-записи
+# (.xkeen.xray.geodata[] в xkeen.json). Нужна как отдельный гейт входа
+# в блок -ug: update_user_geofiles() сама корректно обрабатывает
+# geodata, но до неё поток управления не доходит, если ни один из
+# стандартных флагов обновления не выставлен.
+has_user_geodata() {
+    # shellcheck disable=SC2034 # используется в scripts/xkeen, блок -ug
+    has_user_geodata="false"
+    [ -f "$xkeen_config" ] || return 0
+    command -v jq >/dev/null 2>&1 || return 0
+    if strip_json_comments "$xkeen_config" | jq -e '(.xkeen.xray.geodata // []) | length > 0' >/dev/null 2>&1; then
+        # shellcheck disable=SC2034 # используется в scripts/xkeen, блок -ug
+        has_user_geodata="true"
+    fi
 }
 
 # Функция для загрузки и обработки геофайлов
@@ -40,9 +71,17 @@ process_geo_file() {
 
     local tmp_file="${geo_dir}/${filename}.tmp.$$"
 
-    if _download_and_validate_loop "$url" "$tmp_file" "$expected_size" "" "$display_name"; then
+    # verify_github_sha256 запускаем только для стандартных GitHub Release
+    # URL: process_geo_file() вызывается и для произвольных пользовательских
+    # geofile-источников (update_user_geofiles()), для которых SHA-256 из
+    # GitHub API недоступна
+    if _download_and_validate_loop "$url" "$tmp_file" "$expected_size" "" "$display_name" && { ! _is_github_release_url "$url" || verify_github_sha256 "$tmp_file" "$url"; }; then
         mv -f "$tmp_file" "$geo_dir/$filename"
     else
+        if [ -f "$tmp_file" ]; then
+            rm -f "$tmp_file"
+            _last_error="sha256_mismatch"
+        fi
         # Обработка ошибок, если все попытки провалились
         case "$_last_error" in
             html_stub)
@@ -50,6 +89,9 @@ process_geo_file() {
                 ;;
             size|size_mismatch)
                 printf "  ${red}Ошибка${reset}: Размер загруженного файла не соответствует ожидаемому\n"
+                ;;
+            sha256_mismatch)
+                printf "  ${red}Ошибка${reset}: Контрольная сумма SHA-256 файла %s не подтверждена\n" "$display_name"
                 ;;
             *)
                 local max_attempts=${retries_download:-1}
@@ -107,8 +149,8 @@ install_geosite() {
         process_geo_file "$zkeen_url" "$zkeen_datfile" "GeoSite ZKeen" "$update_zkeen_geosite"
     fi
 
-    # Симлинки zkeen после успешной загрузки
-    if [ -n "$zkeen_datfile" ]; then
+    # Симлинки zkeen, если целевой файл присутствует (успешная загрузка либо уже был на диске)
+    if [ -n "$zkeen_datfile" ] && [ -f "$geo_dir/$zkeen_datfile" ]; then
         if [ "$zkeen_datfile" = "geosite_zkeen.dat" ]; then
             rm -f "$geo_dir/zkeen.dat"
             ln -sf "$geo_dir/geosite_zkeen.dat" "$geo_dir/zkeen.dat"
@@ -149,8 +191,8 @@ install_geoip() {
         process_geo_file "$zkeenip_url" "$zkeenip_datfile" "GeoIP ZKeenIP" "$update_zkeenip_geoip"
     fi
 
-    # Симлинки zkeenip после успешной загрузки
-    if [ -n "$zkeenip_datfile" ]; then
+    # Симлинки zkeenip, если целевой файл присутствует (успешная загрузка либо уже был на диске)
+    if [ -n "$zkeenip_datfile" ] && [ -f "$geo_dir/$zkeenip_datfile" ]; then
         if [ "$zkeenip_datfile" = "geoip_zkeenip.dat" ]; then
             rm -f "$geo_dir/zkeenip.dat"
             ln -sf "$geo_dir/geoip_zkeenip.dat" "$geo_dir/zkeenip.dat"

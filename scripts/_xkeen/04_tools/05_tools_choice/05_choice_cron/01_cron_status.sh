@@ -10,8 +10,14 @@ format_cron_time() {
     hour=$(echo "$cron" | awk '{print $2}')
     dow=$(echo "$cron" | awk '{print $5}')
 
-    formatted_hour=$(printf "%02d" "$hour")
-    formatted_minute=$(printf "%02d" "$minute")
+    case "$hour" in
+        [0-9]) formatted_hour="0$hour" ;;
+        *) formatted_hour="$hour" ;;
+    esac
+    case "$minute" in
+        [0-9]) formatted_minute="0$minute" ;;
+        *) formatted_minute="$minute" ;;
+    esac
 
     case "$dow" in
         "*") day="Ежедневно" ;;
@@ -42,7 +48,6 @@ choice_update_cron() {
     while true; do
         choice_cancel_cron_select=false
         choice_geofile_cron_select=false
-        choice_delete_all_cron_select=false
         invalid_choice=false
 
         echo

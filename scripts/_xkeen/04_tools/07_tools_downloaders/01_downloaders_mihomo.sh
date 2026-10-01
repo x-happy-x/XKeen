@@ -3,6 +3,9 @@ download_mihomo() {
     USE_JSDELIVR=""
     printf "\n  ${green}Запрос информации${reset} о релизах ${yellow}Mihomo${reset}\n"
     fetch_release_tags "$mihomo_api_url" "$mihomo_jsd_url" "10"
+    # Кэш списка релизов (см. fetch_release_tags/_release_cache_path в
+    # 00_fetch_with_mirrors.sh) - удаляется на каждом пути выхода отсюда.
+    _dlm_cache=$(_release_cache_path "$mihomo_api_url") || _dlm_cache=""
 
     while true; do
         echo
@@ -26,6 +29,7 @@ download_mihomo() {
 
         if [ "$choice" = "0" ]; then
             bypass_mihomo="true"
+            [ -n "$_dlm_cache" ] && rm -f "$_dlm_cache"
             printf "  Загрузка Mihomo ${yellow}пропущена${reset}\n"
             return 0
         fi
@@ -79,6 +83,7 @@ download_mihomo() {
 
         if [ -z "$download_url" ] || [ -z "$download_yq" ]; then
             printf "  ${red}Ошибка${reset}: Не удалось получить URL для загрузки Mihomo\n"
+            [ -n "$_dlm_cache" ] && rm -f "$_dlm_cache"
             exit 1
         fi
 
@@ -87,7 +92,7 @@ download_mihomo() {
         mkdir -p "$tmp_ram"
         yq_available="false"
 
-        if ! _network_probe "$download_url" "версии Mihomo $version_selected"; then
+        if ! _network_probe "$download_url" "Mihomo $version_selected"; then
             continue
         fi
 
@@ -95,19 +100,26 @@ download_mihomo() {
             yq_available="true"
             printf "  ${yellow}Используется${reset} установленный парсер конфигурационных файлов Mihomo - Yq\n"
         else
-            printf "  ${yellow}Выполняется загрузка${reset} парсера конфигурационных файлов Mihomo - Yq"
-            if _network_probe "$download_yq" "Yq"; then
-                if _network_download "$download_yq" "$install_dir/yq" "Yq" "$max_attempts" "$delay"; then
-                    verify_github_sha256 "$install_dir/yq" "$download_yq" "$(get_yq_api_url)" || return 1
-                    chmod +x "$install_dir/yq"
+            if _network_probe "$download_yq" "актуальной версии Yq"; then
+                printf "  ${yellow}Выполняется загрузка${reset} парсера конфигурационных файлов Mihomo - Yq\n"
+                yq_tmp_file="$tmp_ram/yq.$$"
+                if _network_download "$download_yq" "$yq_tmp_file" "Yq" "$max_attempts" "$delay"; then
+                    if ! verify_github_sha256 "$yq_tmp_file" "$download_yq" "$(get_yq_api_url)"; then
+                        rm -f "$yq_tmp_file"
+                        [ -n "$_dlm_cache" ] && rm -f "$_dlm_cache"
+                        return 1
+                    fi
+                    chmod +x "$yq_tmp_file"
+                    mv -f "$yq_tmp_file" "$install_dir/yq" || { rm -f "$yq_tmp_file"; [ -n "$_dlm_cache" ] && rm -f "$_dlm_cache"; return 1; }
                     yq_available="true"
-                    printf "  Yq ${green}успешно загружен и установлен${reset}\n"
+                    printf "  Yq ${green}успешно загружен${reset}\n"
                 fi
             fi
         fi
 
         if [ "$yq_available" != "true" ]; then
             printf "  ${red}Ошибка${reset}: Для работы Mihomo требуется Yq. Установка прервана\n"
+            [ -n "$_dlm_cache" ] && rm -f "$_dlm_cache"
             return 1
         fi
 
@@ -117,8 +129,10 @@ download_mihomo() {
             continue
         fi
         if ! verify_github_sha256 "$tmp_ram/mihomo.$extension" "$download_url" "${mihomo_api_url}/tags/$VERSION_ARG"; then
+            [ -n "$_dlm_cache" ] && rm -f "$_dlm_cache"
             continue
         fi
+        [ -n "$_dlm_cache" ] && rm -f "$_dlm_cache"
 
         printf "  Mihomo ${green}успешно загружен${reset}\n"
         return 0
@@ -152,12 +166,20 @@ download_yq() {
         return 1
     fi
 
-    if _network_download "$download_url" "$install_dir/yq" "Yq" "$yq_max_attempts" "$yq_delay"; then
-        verify_github_sha256 "$install_dir/yq" "$download_url" "$(get_yq_api_url)" || return 1
-        chmod +x "$install_dir/yq"
-        printf "  Yq ${green}успешно обновлен/установлен${reset}\n"
+    mkdir -p "$tmp_ram"
+    local yq_tmp_file="$tmp_ram/yq.$$"
+
+    if _network_download "$download_url" "$yq_tmp_file" "Yq" "$yq_max_attempts" "$yq_delay"; then
+        if ! verify_github_sha256 "$yq_tmp_file" "$download_url" "$(get_yq_api_url)"; then
+            rm -f "$yq_tmp_file"
+            return 1
+        fi
+        chmod +x "$yq_tmp_file"
+        mv -f "$yq_tmp_file" "$install_dir/yq" || { rm -f "$yq_tmp_file"; return 1; }
+        printf "  Yq ${green}успешно загружен${reset}\n"
         return 0
     else
+        rm -f "$yq_tmp_file"
         return 1
     fi
 }

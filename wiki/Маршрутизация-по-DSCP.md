@@ -68,7 +68,7 @@ Windows Registry Editor Version 5.00
       "port": 1191,
       "protocol": "tunnel",
       "settings": {
-        "network": "tcp",
+        "allowedNetwork": "tcp",
         "followRedirect": true
       },
       "tag": "force-proxy-redirect"
@@ -77,7 +77,7 @@ Windows Registry Editor Version 5.00
       "port": 1191,
       "protocol": "tunnel",
       "settings": {
-        "network": "udp",
+        "allowedNetwork": "udp",
         "followRedirect": true
       },
       "streamSettings": {
@@ -101,7 +101,7 @@ Windows Registry Editor Version 5.00
       "port": 1191,
       "protocol": "tunnel",
       "settings": {
-        "network": "tcp,udp",
+        "allowedNetwork": "tcp,udp",
         "followRedirect": true
       },
       "streamSettings": {
@@ -118,6 +118,8 @@ Windows Registry Editor Version 5.00
       }
 ```
 
+Примечание: в инструкции используются параметры для актуального ядра Xray-core: `"protocol": "tunnel"`, `"allowedNetwork": "tcp,udp"`. Если используете старое ядро, замените их на совместимые: `"protocol": "dokodemo-door"`, `"network": "tcp,udp"`.
+
 Порт `1191` приведён только для примера. XKeen не использует хардкод порта и определяет его автоматически по inbound'ам `force-proxy-redirect` и `force-proxy-tproxy`.
 
 Также поддерживается компактный вариант с общим тегом `force-proxy`, но раздельные теги проще для чтения и диагностики.
@@ -133,13 +135,11 @@ listeners:
   - name: force-proxy-tproxy
     type: tproxy
     port: 1191
-    listen: 0.0.0.0
     udp: true
     proxy: ProxyUDP
   - name: force-proxy-redirect
     type: redir
     port: 1192
-    listen: 0.0.0.0
     proxy: ProxyTCP
 ```
 
@@ -150,12 +150,10 @@ listeners:
   - name: force-proxy-tproxy
     type: tproxy
     port: 1191
-    listen: 0.0.0.0
     udp: true
   - name: force-proxy-redirect
     type: redir
     port: 1192
-    listen: 0.0.0.0
 
 rules:
   - IN-NAME,force-proxy-tproxy,ProxyUDP
@@ -169,7 +167,6 @@ listeners:
   - name: force-proxy
     type: tproxy
     port: 1191
-    listen: 0.0.0.0
     udp: true
     proxy: ProxyTCPUDP
 ```
@@ -181,7 +178,6 @@ listeners:
   - name: force-proxy
     type: tproxy
     port: 1191
-    listen: 0.0.0.0
     udp: true
 
 rules:

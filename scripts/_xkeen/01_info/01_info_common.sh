@@ -22,6 +22,11 @@ _xkeen_secure_rundir() {
         owner="$3"
         if [ "$owner" != "root" ] || [ "$mode" != "drwx------" ]; then
             rm -rf "$d" 2>/dev/null
+        else
+            # Каталог уже существовал и прошёл проверку owner/mode —
+            # chmod не нужен, права и так верны.
+            printf '%s' "$d"
+            return 0
         fi
     fi
     [ -d "$d" ] || mkdir -m 700 "$d" 2>/dev/null || return 1
@@ -34,7 +39,7 @@ verify_downloads_settings() {
     verify_downloads="warn"
     [ -f "$xkeen_config" ] || return 0
     command -v jq >/dev/null 2>&1 || return 0
-    _vd_value=$(strip_json_comments "$xkeen_config" | jq -r '.xkeen.verify_downloads // "warn"' 2>/dev/null)
+    _vd_value=$(printf '%s' "$_xkeen_json_clean" | jq -r '.xkeen.verify_downloads // "warn"' 2>/dev/null)
     case "$_vd_value" in strict|warn|off) verify_downloads="$_vd_value" ;; esac
     unset _vd_value
 }
@@ -93,6 +98,10 @@ strip_json_comments() {
         print line
     }' "$@"
 }
+# Разобранный без комментариев xkeen.json — считается один раз на инвокейшн
+# и переиспользуется verify_downloads_settings/retries_download_settings/
+# get_rci_token, чтобы не форкать awk трижды на один и тот же файл.
+[ -f "$xkeen_config" ] && _xkeen_json_clean=$(strip_json_comments "$xkeen_config" 2>/dev/null)
 verify_downloads_settings
 
 # Заменить/вставить ЗНАЧЕНИЕ (объект, массив ИЛИ скаляр — строка, число,
@@ -315,18 +324,15 @@ retries_download_settings() {
     retry_delay_download=2
 
     if [ -f "$xkeen_config" ] && command -v jq >/dev/null 2>&1; then
-        local json_clean
-        json_clean=$(strip_json_comments "$xkeen_config")
-
         local parsed_val
-        parsed_val=$(printf '%s' "$json_clean" | jq -r '.xkeen.retries_download // empty' 2>/dev/null)
+        parsed_val=$(printf '%s' "$_xkeen_json_clean" | jq -r '.xkeen.retries_download // empty' 2>/dev/null)
 
         if [ -n "$parsed_val" ] && [ "$parsed_val" -gt 0 ] 2>/dev/null; then
             retries_download="$parsed_val"
         fi
 
         local parsed_delay
-        parsed_delay=$(printf '%s' "$json_clean" | jq -r '.xkeen.retry_delay_download // empty' 2>/dev/null)
+        parsed_delay=$(printf '%s' "$_xkeen_json_clean" | jq -r '.xkeen.retry_delay_download // empty' 2>/dev/null)
         if [ -n "$parsed_delay" ] && [ "$parsed_delay" -gt 0 ] 2>/dev/null; then
             retry_delay_download="$parsed_delay"
         fi
@@ -339,26 +345,25 @@ get_rci_token() {
     rci_token=""
     [ ! -f "$xkeen_config" ] && return 1
 
-    local json_clean
-    json_clean=$(strip_json_comments "$xkeen_config")
-
-    rci_token=$(printf '%s' "$json_clean" | sed -n 's/.*"rci_token": *"\([^"]*\)".*/\1/p' | xargs 2>/dev/null)
+    rci_token=$(printf '%s' "$_xkeen_json_clean" | sed -n 's/.*"rci_token": *"\([^"]*\)".*/\1/p' | sed 's/^[[:space:]]*//; s/[[:space:]]*$//' 2>/dev/null)
 
     [ "$rci_token" = "null" ] && rci_token=""
 }
 get_rci_token
 
 http_code=$(
-    curl -ksS -o /dev/null -w "%{http_code}" -H "X-Ndma-Tkn: $rci_token" "127.0.0.1:79/rci/show/version"
+    curl --connect-timeout 2 -m 5 -ksS -o /dev/null -w "%{http_code}" -H "X-Ndma-Tkn: $rci_token" "127.0.0.1:79/rci/show/version"
 )
 
-if [ "$http_code" = "403" ]; then
-    printf "  ${red}Ошибка${reset}: Отсутствует или недействителен ${light_blue}токен доступа${reset} к RCI
+case "$http_code" in
+    401|403)
+        printf "  ${red}Ошибка${reset}: Отсутствует или недействителен ${light_blue}токен доступа${reset} к RCI
 
   Для ${green}KeeneticOS 5.2${reset} и выше требуется ${light_blue}токен доступа${reset}
-  Создайте его в веб-интерфейсе и укажите в ${yellow}xkeen.json${reset}\n"
-    exit 1
-fi
+  Создайте его в веб-интерфейсе и укажите в ${yellow}xkeen.json${reset}\n" >&2
+        exit 1
+        ;;
+esac
 
 # Параметры curl
 curl_api() {
@@ -424,6 +429,19 @@ curl_with_timeout() {
             curl --connect-timeout 10 -m 180 "$@"
         fi
     fi
+}
+
+# Функция проверки IPv6
+check_ipv6_active() {
+    [ -r /proc/net/if_inet6 ] || return 1
+    awk '
+        $4 == "20" {
+            name = $6
+            if (name ~ /^ezcfg0$/ || name ~ /^t2s/) next
+            found = 1
+        }
+        END { exit !found }
+    ' /proc/net/if_inet6
 }
 
 # Настройки балансировки по скорости (.xkeen.xray.speed_balancer.*).

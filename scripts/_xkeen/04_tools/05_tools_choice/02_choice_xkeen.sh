@@ -65,7 +65,7 @@ change_channel_xkeen() {
 }
 
 change_ipv6_support() {
-    ip -6 addr show 2>/dev/null | grep -q "inet6 fe80::" && ip6_supported="true" || ip6_supported="false"
+    check_ipv6_active && ip6_supported="true" || ip6_supported="false"
 
     if [ "$1" = "on" ]; then
         if [ "$ip6_supported" = "true" ]; then
@@ -145,7 +145,7 @@ change_ipv6_support() {
         # Проверка и вывод результата
         if [ "$desired_state" = "off" ]; then
             echo
-            if ! ip -6 addr show 2>/dev/null | grep -q "inet6 fe80::"; then
+            if ! check_ipv6_active; then
                 echo -e "  Поддержка IPv6 в KeeneticOS ${green}отключена${reset}"
                 echo -e "  ${red}Дополнительно убедитесь, что IPv6 отключен в веб-интерфейсе роутера${reset}"
             else
@@ -235,7 +235,11 @@ check_file_descriptors() {
 
 warn_proxy_dns() {
     echo
-    echo -e "  ${red}Внимание!${reset} Значение данного параметра без соответствующих настроек прокси-клиента ${green}игнорируется${reset}"
+    echo -e "  ${red}Внимание!${reset} Данная настройка устарела и не рекомендуется"
+    echo "  Включайте перехват, только если понимаете, зачем это нужно"
+    echo
+    echo -e "  ${green}Рекомендуемый${reset} способ настройки проксирования DNS по ссылке:"
+    echo "  https://github.com/jameszeroX/XKeen/wiki/DNS-over-VLESS"
 }
 
 change_proxy_dns() {
@@ -438,7 +442,7 @@ change_backup_xkeen() {
 }
 
 change_aghfix_xkeen() {
-    toggle_param "aghfix" "отображения клиентов XKeen под своими IP в журнале AaGuard Home" "restart" "$1"
+    toggle_param "aghfix" "отображения клиентов XKeen под своими IP в журнале AdGuard Home" "restart" "$1"
 }
 
 change_dscp_proxy() {

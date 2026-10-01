@@ -1,0 +1,46 @@
+#!/bin/sh
+# Standalone recovery. Does not depend on the installed XKeen modules or Mihomo API.
+set -eu
+PATH=/opt/bin:/opt/sbin:/usr/sbin:/usr/bin:/sbin:/bin
+BASE=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+ROOT=${HOMENET_ROOT:-/}
+ROOT=${ROOT%/}
+OPT="$ROOT/opt"
+PATH="$OPT/bin:$OPT/sbin:$PATH"
+SERVICE="$OPT/etc/init.d/S05xkeen"
+[ -f "$BASE/before.tar" ] && [ -f "$BASE/paths.txt" ] || { echo 'Backup is incomplete' >&2; exit 1; }
+(cd "$BASE" && sha256sum -c before.sha256) >/dev/null
+case "${1:-}" in
+  --check) tar -tf "$BASE/before.tar" >/dev/null; echo 'Backup checksum and archive OK'; exit 0 ;;
+  --apply) ;;
+  *) echo "Usage: $0 --check | --apply" >&2; exit 2 ;;
+esac
+mkdir "$BASE/restore.lock" 2>/dev/null || { echo 'Rollback already running' >&2; exit 1; }
+trap 'rmdir "$BASE/restore.lock" 2>/dev/null || true' EXIT
+[ ! -x "$SERVICE" ] || "$SERVICE" stop >"$BASE/rollback-stop.log" 2>&1 || true
+# A damaged new service must not prevent recovery: use the known previous service too.
+tar -xOf "$BASE/before.tar" opt/etc/init.d/S05xkeen > "$BASE/restore-service.sh"
+sh "$BASE/restore-service.sh" stop >>"$BASE/rollback-stop.log" 2>&1 || true
+# Last resort applies only to the exact managed executable, never every proxy process.
+for pid in $(pidof mihomo 2>/dev/null || true); do
+  exe=$(readlink "/proc/$pid/exe" 2>/dev/null || true)
+  case "$exe" in "$OPT/sbin/mihomo"|"$OPT/sbin/mihomo (deleted)")
+    kill "$pid" 2>/dev/null || true
+    sleep 2
+    [ ! -e "/proc/$pid/exe" ] || kill -9 "$pid" 2>/dev/null || true
+  ;; esac
+done
+# Atomic replacement is also safe if an old executable still has an open mapping.
+[ ! -f "$OPT/sbin/mihomo" ] || mv "$OPT/sbin/mihomo" "$BASE/failed-mihomo-$(date +%s)-$$"
+# Move only the two replaceable trees aside; old files must not mix with new ones.
+for rel in sbin/.xkeen etc/mihomo/zash; do
+  if [ -d "$OPT/$rel" ]; then
+    destination="$BASE/failed-$(basename "$rel")-$(date +%s)-$$"
+    mv "$OPT/$rel" "$destination"
+  fi
+done
+tar -xf "$BASE/before.tar" -C "${ROOT:-/}"
+sync
+"$SERVICE" start manual >"$BASE/rollback-start.log" 2>&1
+: > "$BASE/rolled-back"
+echo "Previous files restored. Service started. Backup: $BASE"

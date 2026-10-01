@@ -24,7 +24,7 @@ def scenario(fail=False, watchdog=False):
         put(root, 'opt/etc/mihomo/cache.db', 'old-history')
         put(root, 'opt/etc/mihomo/zash/index.html', 'old-ui')
         put(root, 'opt/bin/curl', '#!/bin/sh\ncase "$*" in */version*) echo \'{"version":"new"}\';; *) echo html;; esac\n', True)
-        put(stage, 'mihomo', '#!/bin/sh\nexit 0\n', True)
+        put(stage, 'mihomo', '#!/bin/sh\nexit 0\n', False)
         put(stage, 'xkeen/xkeen', '#!/bin/sh\necho new-cli\n', True)
         put(stage, 'xkeen/_xkeen/new-module', 'new')
         put(stage, 'zash/index.html', 'new-ui')

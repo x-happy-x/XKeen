@@ -134,6 +134,8 @@ def main():
     deadline=time.monotonic()+240
     while time.monotonic()<deadline:
         flags=ssh(host, 'for f in ready rolled-back; do [ ! -f '+backup+'/$f ] || echo $f; done; true').decode().split()
+        failed=ssh(host, 'test ! -f '+stage+'/failed || cat '+stage+'/failed').decode().strip()
+        if failed: raise RuntimeError('Deployment failed with exit '+failed+'. Inspect '+stage+'/deploy.log; recovery status in '+backup)
         if 'rolled-back' in flags: raise RuntimeError('Deployment rolled back. Logs: '+backup)
         if 'ready' in flags: break
         time.sleep(3)

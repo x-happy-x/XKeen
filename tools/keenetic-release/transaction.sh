@@ -20,6 +20,7 @@ armed=0
 stopped=0
 cleanup() {
   rc=$?
+  [ "$rc" = 0 ] || printf '%s\n' "$rc" > "$STAGE/failed"
   trap - EXIT INT TERM HUP
   if [ "$armed" = 1 ]; then
     sh "$BASE/rollback.sh" --apply >>"$BASE/rollback.log" 2>&1 || echo "ROLLBACK FAILED: $BASE/rollback.log" >&2
@@ -36,6 +37,13 @@ mkdir -p "$BASE"
 cp "$STAGE/rollback.sh" "$BASE/rollback.sh"
 chmod 700 "$BASE/rollback.sh"
 (cd "$STAGE" && sha256sum -c payload.sha256) >/dev/null
+# NTFS tar writers do not preserve POSIX executable bits.
+for tree in "$STAGE/xkeen" "$STAGE/zash"; do
+  find "$tree" -type d -exec chmod 755 {} \;
+  find "$tree" -type f -exec chmod 644 {} \;
+done
+chmod 755 "$STAGE/mihomo" "$STAGE/xkeen/xkeen" "$STAGE/S05xkeen"
+chmod 600 "$STAGE/config.yaml"
 sh -n "$STAGE/xkeen/xkeen"
 sh -n "$STAGE/S05xkeen"
 "$STAGE/mihomo" -v > "$BASE/new-version.txt"

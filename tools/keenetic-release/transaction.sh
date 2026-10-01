@@ -85,7 +85,7 @@ mv "$OPT/etc/mihomo/zash" "$BASE/replaced-zash"
 mv "$STAGE/zash" "$OPT/etc/mihomo/zash"
 if [ -d "$BASE/replaced-zash/assets" ]; then
   mkdir -p "$OPT/etc/mihomo/zash/assets"
-  cp -an "$BASE/replaced-zash/assets/." "$OPT/etc/mihomo/zash/assets/"
+  cp -a "$BASE/replaced-zash/assets/." "$OPT/etc/mihomo/zash/assets/"
 fi
 cp "$STAGE/S05xkeen" "$SERVICE.new"
 chmod 755 "$SERVICE.new"

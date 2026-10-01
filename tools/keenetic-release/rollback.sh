@@ -1,6 +1,7 @@
 #!/bin/sh
 # Standalone recovery. Does not depend on the installed XKeen modules or Mihomo API.
 set -eu
+umask 077
 PATH=/opt/bin:/opt/sbin:/usr/sbin:/usr/bin:/sbin:/bin
 BASE=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 ROOT=${HOMENET_ROOT:-/}
@@ -17,6 +18,10 @@ case "${1:-}" in
 esac
 mkdir "$BASE/restore.lock" 2>/dev/null || { echo 'Rollback already running' >&2; exit 1; }
 trap 'rmdir "$BASE/restore.lock" 2>/dev/null || true' EXIT
+# Retain failed runtime evidence privately before restoring the known good state.
+# Diagnostic capture must never prevent recovery if disk space is exhausted.
+failed_state="$BASE/failed-state-$(date +%s)-$$.tar"
+(cd "${ROOT:-/}" && tar -cf "$failed_state" opt/etc/mihomo/config.yaml opt/etc/mihomo/profiles opt/etc/init.d/S05xkeen) 2>"$BASE/failed-state.log" || true
 [ ! -x "$SERVICE" ] || "$SERVICE" stop >"$BASE/rollback-stop.log" 2>&1 || true
 # A damaged new service must not prevent recovery: use the known previous service too.
 tar -xOf "$BASE/before.tar" opt/etc/init.d/S05xkeen > "$BASE/restore-service.sh"
@@ -30,6 +35,8 @@ for pid in $(pidof mihomo 2>/dev/null || true); do
     [ ! -e "/proc/$pid/exe" ] || kill -9 "$pid" 2>/dev/null || true
   ;; esac
 done
+# cache.db is captured only after the writer has stopped.
+[ ! -f "$OPT/etc/mihomo/cache.db" ] || tar -rf "$failed_state" -C "${ROOT:-/}" opt/etc/mihomo/cache.db 2>>"$BASE/failed-state.log" || true
 # Atomic replacement is also safe if an old executable still has an open mapping.
 [ ! -f "$OPT/sbin/mihomo" ] || mv "$OPT/sbin/mihomo" "$BASE/failed-mihomo-$(date +%s)-$$"
 # Move only the two replaceable trees aside; old files must not mix with new ones.

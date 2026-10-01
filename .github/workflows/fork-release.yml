@@ -21,6 +21,8 @@ jobs:
             cd /repo
             for t in spec/test_*.sh; do sh "$t" || exit; done
           '
+      - name: Test deployment rollback
+        run: python3 tools/keenetic-release/test_transaction.py
       - name: Package
         run: |
           VERSION=$(sed -n 's/^xkeen_current_version="\(.*\)"$/\1/p' scripts/_xkeen/01_info/01_info_variable.sh)-fork.${{ github.run_number }}

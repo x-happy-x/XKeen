@@ -1,0 +1,41 @@
+name: Fork release
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: write
+concurrency:
+  group: fork-release
+  cancel-in-progress: false
+jobs:
+  release:
+    if: github.repository == 'x-happy-x/XKeen' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Test
+        run: |
+          docker run --rm -v "$PWD:/repo:ro" alpine:3.22 sh -c '
+            apk add --no-cache jq curl >/dev/null
+            cd /repo
+            for t in spec/test_*.sh; do sh "$t" || exit; done
+          '
+      - name: Package
+        run: |
+          VERSION=$(sed -n 's/^xkeen_current_version="\(.*\)"$/\1/p' scripts/_xkeen/01_info/01_info_variable.sh)-fork.${{ github.run_number }}
+          echo "TAG=$VERSION" >> "$GITHUB_ENV"
+          mkdir -p release build
+          cp -a scripts/. build/
+          sed -i "s/^xkeen_current_version=.*/xkeen_current_version=\"$VERSION\"/" build/_xkeen/01_info/01_info_variable.sh
+          sed -i "s/^build_timestamp=.*/build_timestamp=\"$(TZ=Europe/Moscow date '+%Y-%m-%d %H:%M:%S')\"/" build/_xkeen/01_info/01_info_variable.sh
+          find build -name '*.sh' -exec sh -n {} \;
+          sh -n build/xkeen
+          chmod +x build/xkeen
+          tar -czf release/xkeen.tar.gz -C build .
+          tar -tzf release/xkeen.tar.gz >/dev/null
+          (cd release && sha256sum xkeen.tar.gz > sha256sums.txt)
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$TAG" release/* --target "$GITHUB_SHA" --title "$TAG" --generate-notes --latest

@@ -15,6 +15,7 @@ on:
 
 jobs:
   release:
+    if: github.repository == 'jameszeroX/XKeen'
     runs-on: ubuntu-latest
     permissions:
       contents: write

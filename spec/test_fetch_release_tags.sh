@@ -207,6 +207,17 @@ check "retries>1: задержка = retry_delay_download" "$(sort -u "$WORK/sle
 check "retries>1: в итоге получен jsDelivr"  "$USE_JSDELIVR" "true"
 check "retries>1: тег с последней попытки"   "$(tag_has 9.9.9)" "1"
 
+# Fork releases are stable builds; generic prerelease tags remain excluded.
+frt_reset
+printf '%s\n' '[{"tag_name":"v1.19.32-fork.12"},{"tag_name":"v1.19.32-fork.bad"},{"tag_name":"v1.19.32-beta.1"}]' > "$WORK/api_queue"
+fetch_release_tags "$FAKE_API_URL" "$FAKE_JSD_URL" 10 >/dev/null 2>&1
+check "fork: stable API tag accepted" "$(tag_has v1.19.32-fork.12)" "1"
+check "fork: malformed and beta excluded" "$(tags_count)" "1"
+frt_reset
+printf '%s\n' '{"versions":["v1.19.32-fork.12","v1.19.32-beta.1"]}' > "$WORK/jsd_queue"
+fetch_release_tags "$FAKE_API_URL" "$FAKE_JSD_URL" 10 >/dev/null 2>&1
+check "fork: jsDelivr tag accepted" "$(tag_has v1.19.32-fork.12)" "1"
+
 rm -rf "$WORK"
 printf '\n=== пройдено: %s, провалено: %s ===\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]

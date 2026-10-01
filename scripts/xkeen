@@ -439,7 +439,7 @@ while [ $# -gt 0 ]; do
                 echo -e "  Страница загрузок xray: ${yellow}https://github.com/XTLS/Xray-core/releases/latest${reset}"
                 echo
                 echo -e "  Если планируете использовать ядро mihomo, поместите бинарники ${yellow}mihomo${reset} и ${yellow}yq${reset}\n  архитектуры ${green}$architecture${reset} в директорию /opt/sbin/ и начните установку снова"
-                echo -e "  Страница загрузок mihomo: ${yellow}https://github.com/MetaCubeX/mihomo/releases/latest${reset}"
+                echo -e "  Страница загрузок mihomo: ${yellow}https://github.com/x-happy-x/mihomo/releases/latest${reset}"
                 echo -e "  Страница загрузок yq: ${yellow}https://github.com/mikefarah/yq/releases/latest${reset}"
                 echo
                 exit 1
@@ -1001,7 +1001,7 @@ while [ $# -gt 0 ]; do
             echo -e "  Установить ${yellow}XKeen${reset} заново можно командами:"
             echo
             echo -e "  ${green}opkg update && opkg install curl tar && cd /tmp${reset}"
-            echo -e "  ${green}"'sh -c "$(curl -sSL https://raw.githubusercontent.com/jameszeroX/XKeen/main/install.sh)"'"${reset}"
+            echo -e "  ${green}"'sh -c "$(curl -sSL https://raw.githubusercontent.com/x-happy-x/XKeen/main/install.sh)"'"${reset}"
 
 
         ;;
@@ -1147,7 +1147,7 @@ while [ $# -gt 0 ]; do
             echo -e "  Установить ${yellow}XKeen${reset} заново можно командами:"
             echo
             echo -e "  ${green}opkg update && opkg install curl tar && cd /tmp${reset}"
-            echo -e "  ${green}"'sh -c "$(curl -sSL https://raw.githubusercontent.com/jameszeroX/XKeen/main/install.sh)"'"${reset}"
+            echo -e "  ${green}"'sh -c "$(curl -sSL https://raw.githubusercontent.com/x-happy-x/XKeen/main/install.sh)"'"${reset}"
         ;;
 
 

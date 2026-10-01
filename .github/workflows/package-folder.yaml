@@ -16,7 +16,7 @@ concurrency:
 jobs:
   build-and-push-to-main-test-folder:
     # запуск вручную с тега создал бы ветку с именем тега
-    if: github.ref_type == 'branch'
+    if: github.repository == 'jameszeroX/XKeen' && (github.ref_type == 'branch')
     runs-on: ubuntu-latest
     permissions:
       contents: write

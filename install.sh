@@ -7,8 +7,8 @@ light_blue="\033[96m"
 italic="\033[3m"
 reset="\033[0m"
 
-url_stable="https://github.com/jameszeroX/XKeen/releases/latest/download/xkeen.tar.gz"
-url_beta="https://raw.githubusercontent.com/jameszeroX/XKeen/main/test/xkeen.tar.gz"
+url_stable="https://github.com/x-happy-x/XKeen/releases/latest/download/xkeen.tar.gz"
+url_beta="https://github.com/x-happy-x/XKeen/releases/latest/download/xkeen.tar.gz"
 archive_name="xkeen.tar.gz"
 xkeen_config="/opt/etc/xkeen/xkeen.json"
 
@@ -30,7 +30,7 @@ echo  "    $0 --beta"
 echo  "    $0 --legacy 1.1.3.9"
 echo  "    $0 --patch"
 echo  "    $0 --help"
-echo  "    curl -sSL https://raw.githubusercontent.com/jameszeroX/XKeen/main/install.sh | sh -s -- --stable"
+echo  "    curl -sSL https://raw.githubusercontent.com/x-happy-x/XKeen/main/install.sh | sh -s -- --stable"
 }
 
 # Дубль функции из scripts/_xkeen/01_info/01_info_common.sh: install.sh
@@ -334,7 +334,7 @@ if [ -z "$VERSION_TYPE" ]; then
 
                     [ "$legacy_version" = 0 ] && exit 0
 
-                    url="https://github.com/jameszeroX/XKeen/releases/download/${legacy_version}/xkeen.tar.gz"
+                    url="https://github.com/x-happy-x/XKeen/releases/download/${legacy_version}/xkeen.tar.gz"
                     
                     printf "  Проверяем доступность версии ${yellow}%s${reset}...\n" "$legacy_version"
                     
@@ -374,7 +374,7 @@ else
                 show_help
                 exit 1
             fi
-            url="https://github.com/jameszeroX/XKeen/releases/download/${LEGACY_VERSION}/xkeen.tar.gz"
+            url="https://github.com/x-happy-x/XKeen/releases/download/${LEGACY_VERSION}/xkeen.tar.gz"
             printf "  Выбрана предыдущая версия ${yellow}%s${reset} (автоматическая установка)\n" "$LEGACY_VERSION"
             printf "  Проверяем доступность версии ${yellow}%s${reset}...\n" "$LEGACY_VERSION"
             

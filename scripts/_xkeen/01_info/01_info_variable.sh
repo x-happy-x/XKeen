@@ -79,16 +79,16 @@ target_dir="/opt"
 # -------------------------------------
 # URL
 # -------------------------------------
-xkeen_api_url="https://api.github.com/repos/jameszeroX/xkeen/releases/latest"			# url api для XKeen
-xkeen_jsd_url="https://data.jsdelivr.com/v1/package/gh/jameszeroX/xkeen"			# резервный url api для XKeen
-xkeen_tar_url="https://github.com/jameszeroX/XKeen/releases/latest/download/xkeen.tar.gz"	# url для загрузки XKeen
-xkeen_dev_url="https://raw.githubusercontent.com/jameszeroX/xkeen/main/test/xkeen.tar.gz"	# url для загрузки XKeen dev
+xkeen_api_url="https://api.github.com/repos/x-happy-x/XKeen/releases/latest"			# url api для XKeen
+xkeen_jsd_url="https://data.jsdelivr.com/v1/package/gh/x-happy-x/XKeen"			# резервный url api для XKeen
+xkeen_tar_url="https://github.com/x-happy-x/XKeen/releases/latest/download/xkeen.tar.gz"	# url для загрузки XKeen
+xkeen_dev_url="https://github.com/x-happy-x/XKeen/releases/latest/download/xkeen.tar.gz"	# url для загрузки XKeen dev
 xray_api_url="https://api.github.com/repos/XTLS/Xray-core/releases"				# url api для Xray
 xray_jsd_url="https://data.jsdelivr.com/v1/package/gh/XTLS/Xray-core"				# резервный url api для Xray
 xray_zip_url="https://github.com/XTLS/Xray-core/releases/download"				# url для загрузки Xray
-mihomo_api_url="https://api.github.com/repos/MetaCubeX/mihomo/releases"				# url api для Mihomo
-mihomo_jsd_url="https://data.jsdelivr.com/v1/package/gh/MetaCubeX/mihomo"			# резервный url api для Mihomo
-mihomo_gz_url="https://github.com/MetaCubeX/mihomo/releases/download"				# url для загрузки Mihomo
+mihomo_api_url="https://api.github.com/repos/x-happy-x/mihomo/releases"				# url api для Mihomo
+mihomo_jsd_url="https://data.jsdelivr.com/v1/package/gh/x-happy-x/mihomo"			# резервный url api для Mihomo
+mihomo_gz_url="https://github.com/x-happy-x/mihomo/releases/download"				# url для загрузки Mihomo
 yq_api_url="https://api.github.com/repos/mikefarah/yq/releases/latest"				# url api для оригинального Yq
 yq_workaround_api_url="https://api.github.com/repos/jameszeroX/yq/releases/latest"		# url api для рабочего Yq
 yq_upstream_dist_url="https://github.com/mikefarah/yq/releases/latest/download"			# url для загрузки оригинального Yq
